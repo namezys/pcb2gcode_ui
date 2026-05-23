@@ -38,6 +38,8 @@ segments are drawn as dotted low-alpha lines in the same tool color.
 
 The preview colors G-code by NC file and active tool id. Movement before any tool selection is
 grouped into an initial `none` tool path, so it remains visible instead of being merged or skipped.
+Back NC output is mirrored horizontally into the same board view as the back Gerber layer before
+any whole-layout Back-side view mirror is applied.
 
 The Preview dialog overlays a tool table on the canvas for the active NC outputs. File groups are
 introduced by labeled separators using the loaded NC filename. The table shows path number, tool

@@ -27,6 +27,7 @@ from pcb2gcode_ui.preview import (
     _parse_drill_file,
     _tint_layer_image,
     _transform_point,
+    _transformed_bounds,
 )
 
 
@@ -509,6 +510,99 @@ def test_compose_preview_back_side_mirrors_gcode_horizontally():
     )
 
     assert image.getpixel((9, 5))[:3] != (32, 35, 38)
+
+
+def test_compose_preview_mirrors_back_gcode_on_front_side():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(2, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(-2, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-2, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((1, 5))[:3] != (32, 35, 38)
+    assert image.getpixel((9, 5))[:3] == (32, 35, 38)
+
+
+def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(2, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(-2, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-2, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((10, 5))[:3] != (32, 35, 38)
+    assert image.getpixel((1, 5))[:3] == (32, 35, 38)
+
+
+def test_transformed_bounds_include_origin_mirrored_back_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(2, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 2, 10))
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds.min_x == -4
+    assert bounds.max_x == 2
 
 
 def test_compose_preview_does_not_mirror_back_layer():

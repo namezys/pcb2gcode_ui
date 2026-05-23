@@ -707,7 +707,7 @@ def _transformed_bounds(
         bounds = drill_bounds if bounds is None else bounds.expand(drill_bounds)
     if _has_gcode(gcode_trace):
         points = [
-            _transform_point(point.x_mm, point.y_mm, settings)
+            _transform_gcode_point(point.x_mm, point.y_mm, segment.source_kind, settings)
             for segment in gcode_trace.segments
             for point in (segment.start, segment.end)
         ]
@@ -883,8 +883,22 @@ def _draw_gcode_trace(
         for idx, tool_path in enumerate(trace.active_tool_paths)
     }
     for segment in trace.segments:
-        start = _preview_point(segment.start.x_mm, segment.start.y_mm, bounds, settings, options)
-        end = _preview_point(segment.end.x_mm, segment.end.y_mm, bounds, settings, options)
+        start = _preview_point(
+            segment.start.x_mm,
+            segment.start.y_mm,
+            segment.source_kind,
+            bounds,
+            settings,
+            options,
+        )
+        end = _preview_point(
+            segment.end.x_mm,
+            segment.end.y_mm,
+            segment.source_kind,
+            bounds,
+            settings,
+            options,
+        )
         color = tool_path_colors.get(
             gcode_tool_path_id(segment.source_kind, segment.tool_id),
             _hex_to_rgba(gcode_instrument_color(0), GCODE_CUT_ALPHA),
@@ -909,17 +923,35 @@ def _draw_gcode_trace(
 def _preview_point(
     x_value: float,
     y_value: float,
+    source_kind: str,
     bounds: Bounds,
     settings: TransformSettings,
     options: PreviewOptions,
 ) -> tuple[float, float]:
-    transformed_x, transformed_y = _transform_point(x_value, y_value, settings)
+    transformed_x, transformed_y = _transform_gcode_point(
+        x_value,
+        y_value,
+        source_kind,
+        settings,
+    )
     if _mirror_preview(options):
         transformed_x = bounds.max_x - transformed_x + bounds.min_x
     return (
         (transformed_x - bounds.min_x) * options.dpmm,
         (bounds.max_y - transformed_y) * options.dpmm,
     )
+
+
+def _transform_gcode_point(
+    x_value: float,
+    y_value: float,
+    source_kind: str,
+    settings: TransformSettings,
+) -> tuple[float, float]:
+    transformed_x, transformed_y = _transform_point(x_value, y_value, settings)
+    if source_kind == PreviewLayerKind.BACK:
+        transformed_x = -transformed_x
+    return transformed_x, transformed_y
 
 
 def _draw_dotted_line(
