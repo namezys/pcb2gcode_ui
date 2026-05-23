@@ -80,6 +80,7 @@ class Pcb2GCodeApp:
         self.values = default_values()
         self.controls: dict[str, ft.Control] = {}
         self.current_millproject: Path = None
+        self.working_directory = Path.cwd()
         self.file_picker = ft.FilePicker()
         self.other_layer_picker = ft.FilePicker()
         self.directory_picker = ft.FilePicker()
@@ -626,6 +627,7 @@ class Pcb2GCodeApp:
     async def _pick_input_file(self, _event, key: str):
         selected_files = await self.file_picker.pick_files(
             dialog_title=f"Select {SPEC_BY_KEY[key].label}",
+            initial_directory=str(self.working_directory),
             allow_multiple=False,
         )
         if not selected_files:
@@ -634,20 +636,24 @@ class Pcb2GCodeApp:
         if not selected_path:
             self._set_output("Selected file has no local filesystem path.")
             return
+        path = Path(selected_path)
+        self._set_working_directory(path.parent)
         self._set_value(key, selected_path)
         self._set_default_output_dir()
 
     async def _pick_output_directory(self, _event):
         selected_path = await self.directory_picker.get_directory_path(
             dialog_title="Select NC output directory",
-            initial_directory=self.values.get("output-dir", ""),
+            initial_directory=self.values.get("output-dir", "") or str(self.working_directory),
         )
         if selected_path:
+            self._set_working_directory(Path(selected_path))
             self._set_value("output-dir", selected_path)
 
     async def _pick_aux_layer(self, _event):
         selected_files = await self.other_layer_picker.pick_files(
             dialog_title="Select preview-only aux Gerber",
+            initial_directory=str(self.working_directory),
             allow_multiple=False,
         )
         if not selected_files:
@@ -658,6 +664,7 @@ class Pcb2GCodeApp:
             self.page.update()
             return
         self.preview_aux_layer = Path(selected_path)
+        self._set_working_directory(self.preview_aux_layer.parent)
         self._refresh_preview(_event)
 
     def _load_gcode_outputs(self, event):
@@ -683,6 +690,7 @@ class Pcb2GCodeApp:
     async def _open_file(self, _event):
         selected_files = await self.file_picker.pick_files(
             dialog_title="Open millproject",
+            initial_directory=str(self.working_directory),
             allow_multiple=False,
         )
         if not selected_files:
@@ -693,6 +701,7 @@ class Pcb2GCodeApp:
             return
         path = Path(selected_path)
         self.current_millproject = path
+        self._set_working_directory(path.parent)
         self.values = parse_millproject(path)
         for key, value in self.values.items():
             self._set_value(key, value)
@@ -711,10 +720,11 @@ class Pcb2GCodeApp:
             file_name="millproject",
             initial_directory=str(self.current_millproject.parent)
             if self.current_millproject
-            else "",
+            else str(self.working_directory),
         )
         if selected_path:
             self.current_millproject = Path(selected_path)
+            self._set_working_directory(self.current_millproject.parent)
             self._write_millproject(self.current_millproject)
 
     def _write_millproject(self, path: Path):
@@ -844,7 +854,10 @@ class Pcb2GCodeApp:
     def _base_dir(self) -> Path:
         if self.current_millproject:
             return self.current_millproject.parent
-        return Path.cwd()
+        return self.working_directory
+
+    def _set_working_directory(self, path: Path):
+        self.working_directory = path
 
     def _configure_window(self):
         window = getattr(self.page, "window", None)

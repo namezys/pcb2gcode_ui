@@ -52,24 +52,30 @@ class FakeSegmentedControl:
 class FakeFilePicker:
     def __init__(self, selected_files: list[FakeFile] = None):
         self.selected_files = selected_files or []
+        self.kwargs: dict[str, object] = {}
 
-    async def pick_files(self, **_kwargs) -> list[FakeFile]:
+    async def pick_files(self, **kwargs) -> list[FakeFile]:
+        self.kwargs = kwargs
         return self.selected_files
 
 
 class FakeDirectoryPicker:
     def __init__(self, selected_path: str = ""):
         self.selected_path = selected_path
+        self.kwargs: dict[str, object] = {}
 
-    async def get_directory_path(self, **_kwargs) -> str:
+    async def get_directory_path(self, **kwargs) -> str:
+        self.kwargs = kwargs
         return self.selected_path
 
 
 class FakeSavePicker:
     def __init__(self, selected_path: str = ""):
         self.selected_path = selected_path
+        self.kwargs: dict[str, object] = {}
 
-    async def save_file(self, **_kwargs) -> str:
+    async def save_file(self, **kwargs) -> str:
+        self.kwargs = kwargs
         return self.selected_path
 
 
@@ -109,19 +115,25 @@ def test_app_build_constructs_initial_controls():
 def test_open_file_awaits_picker_and_loads_millproject(tmp_path: Path):
     millproject_path = tmp_path / "millproject"
     millproject_path.write_text("metric=true\nzsafe=5\n", encoding="utf-8")
+    start_path = tmp_path / "previous"
     app = _app()
+    app.working_directory = start_path
     app.file_picker = FakeFilePicker([FakeFile(str(millproject_path))])
 
     asyncio.run(app._open_file(None))
 
     assert app.current_millproject == millproject_path
+    assert app.working_directory == tmp_path
+    assert app.file_picker.kwargs["initial_directory"] == str(start_path)
     assert app.values["metric"] == "true"
     assert app.values["zsafe"] == "5"
 
 
 def test_pick_input_file_sets_default_output_directory(tmp_path: Path):
     gerber_path = tmp_path / "board-F.Cu.gbr"
+    start_path = tmp_path / "previous"
     app = _app()
+    app.working_directory = start_path
     app.file_picker = FakeFilePicker([FakeFile(str(gerber_path))])
     app.controls["front"] = ft.TextField()
     app.controls["output-dir"] = ft.TextField()
@@ -130,29 +142,69 @@ def test_pick_input_file_sets_default_output_directory(tmp_path: Path):
 
     assert app.values["front"] == str(gerber_path)
     assert app.values["output-dir"] == str(tmp_path / "nc")
+    assert app.working_directory == tmp_path
+    assert app.file_picker.kwargs["initial_directory"] == str(start_path)
 
 
 def test_pick_output_directory_awaits_picker(tmp_path: Path):
     output_path = tmp_path / "nc"
+    start_path = tmp_path / "previous"
     app = _app()
+    app.working_directory = start_path
     app.directory_picker = FakeDirectoryPicker(str(output_path))
     app.controls["output-dir"] = ft.TextField()
 
     asyncio.run(app._pick_output_directory(None))
 
     assert app.values["output-dir"] == str(output_path)
+    assert app.working_directory == output_path
+    assert app.directory_picker.kwargs["initial_directory"] == str(start_path)
+
+
+def test_pick_output_directory_prefers_existing_output_dir(tmp_path: Path):
+    output_path = tmp_path / "nc"
+    start_path = tmp_path / "previous"
+    existing_path = tmp_path / "existing-nc"
+    app = _app()
+    app.working_directory = start_path
+    app.values["output-dir"] = str(existing_path)
+    app.directory_picker = FakeDirectoryPicker(str(output_path))
+    app.controls["output-dir"] = ft.TextField()
+
+    asyncio.run(app._pick_output_directory(None))
+
+    assert app.directory_picker.kwargs["initial_directory"] == str(existing_path)
 
 
 def test_save_as_awaits_picker_and_writes_millproject(tmp_path: Path):
     millproject_path = tmp_path / "millproject"
+    start_path = tmp_path / "previous"
     app = _app()
+    app.working_directory = start_path
     app.values["metric"] = "true"
     app.save_picker = FakeSavePicker(str(millproject_path))
 
     asyncio.run(app._save_as(None))
 
     assert app.current_millproject == millproject_path
+    assert app.working_directory == tmp_path
+    assert app.save_picker.kwargs["initial_directory"] == str(start_path)
     assert parse_millproject(millproject_path)["metric"] == "true"
+
+
+def test_save_as_prefers_current_millproject_directory(tmp_path: Path):
+    project_path = tmp_path / "project" / "millproject"
+    project_path.parent.mkdir()
+    saved_path = tmp_path / "saved" / "millproject"
+    saved_path.parent.mkdir()
+    app = _app()
+    app.current_millproject = project_path
+    app.save_picker = FakeSavePicker(str(saved_path))
+
+    asyncio.run(app._save_as(None))
+
+    assert app.save_picker.kwargs["initial_directory"] == str(project_path.parent)
+    assert app.working_directory == saved_path.parent
 
 
 def test_refresh_preview_sets_image_data_uri():
@@ -295,14 +347,31 @@ def test_file_row_includes_help_button_without_breaking_browse_button():
 
 def test_pick_aux_layer_is_preview_only_and_single_file(tmp_path: Path):
     aux_path = tmp_path / "board-F.SilkS.gbr"
+    start_path = tmp_path / "previous"
     app = _app()
+    app.working_directory = start_path
     app.preview_renderer = FakePreviewRenderer()
     app.other_layer_picker = FakeFilePicker([FakeFile(str(aux_path))])
 
     asyncio.run(app._pick_aux_layer(None))
 
     assert app.preview_aux_layer == aux_path
+    assert app.working_directory == tmp_path
+    assert app.other_layer_picker.kwargs["initial_directory"] == str(start_path)
     assert app.preview_renderer.aux_layer == aux_path
+
+
+def test_base_dir_uses_working_directory_until_project_is_open(tmp_path: Path):
+    working_path = tmp_path / "working"
+    project_path = tmp_path / "project" / "millproject"
+    app = _app()
+    app.working_directory = working_path
+
+    assert app._base_dir() == working_path
+
+    app.current_millproject = project_path
+
+    assert app._base_dir() == project_path.parent
 
 
 def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
