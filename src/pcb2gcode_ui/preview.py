@@ -21,7 +21,7 @@ from pcb2gcode_ui.options import bool_value
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PREVIEW_DPMM = 24
-DEFAULT_LAYER_ALPHA = 85
+DEFAULT_LAYER_ALPHA = 50
 MAX_ALPHA = 255
 MIN_CANVAS_SIZE = 1
 MAX_PREVIEW_PIXELS = 50_000_000
@@ -52,6 +52,7 @@ class PreviewSide(StrEnum):
 class PreviewLayerKind(StrEnum):
     FRONT = "front"
     BACK = "back"
+    DRILL = "drill"
     CUTOFF = "cutoff"
     AUX = "aux"
 
@@ -244,7 +245,6 @@ class GerberPreviewRenderer:
                 bounds = _bounds_from_parsed_file(parsed_file)
                 image = _render_parsed_file(parsed_file, layer.color_scheme, options.dpmm)
                 image = _tint_layer_image(image, _layer_color(layer.kind))
-                image = _apply_alpha(image, options.layer_alpha)
                 rendered_layers.append(
                     RenderedLayer(
                         image=image,
@@ -451,7 +451,7 @@ def _render_cutoff_fallback(
     height_px = max(math.ceil(bounds.height * options.dpmm), MIN_CANVAS_SIZE)
     image = Image.new("RGBA", (width_px, height_px), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    color = (*_layer_color(PreviewLayerKind.CUTOFF), _alpha_value(options.layer_alpha))
+    color = (*_layer_color(PreviewLayerKind.CUTOFF), MAX_ALPHA)
     for segment in segments:
         line_width = max(round(segment.diameter_mm * options.dpmm), 1)
         draw.line(
@@ -608,7 +608,7 @@ def _layer_color(kind: PreviewLayerKind) -> tuple[int, int, int]:
     if kind == PreviewLayerKind.FRONT:
         return (35, 220, 150)
     if kind == PreviewLayerKind.BACK:
-        return (255, 164, 54)
+        return (232, 74, 95)
     if kind == PreviewLayerKind.CUTOFF:
         return (235, 238, 242)
     return (80, 150, 255)
@@ -729,15 +729,62 @@ def _compose_preview(
     width_px = max(math.ceil(bounds.width * options.dpmm), MIN_CANVAS_SIZE)
     height_px = max(math.ceil(bounds.height * options.dpmm), MIN_CANVAS_SIZE)
     board_image = Image.new("RGBA", (width_px, height_px), (32, 35, 38, 255))
-    for layer in rendered_layers:
-        image = layer.image
-        layer_bounds = _transform_bounds(layer.bounds, settings)
-        left = round((layer_bounds.min_x - bounds.min_x) * options.dpmm)
-        top = round((bounds.max_y - layer_bounds.max_y) * options.dpmm)
-        board_image.alpha_composite(image, (left, top))
-    if drill_layer and drill_layer.hits:
-        _draw_drills(board_image, drill_layer, bounds, settings, options)
+    for layer_kind in _layer_paint_order(options.side):
+        if layer_kind == PreviewLayerKind.DRILL:
+            if drill_layer and drill_layer.hits:
+                _draw_drills(board_image, drill_layer, bounds, settings, options)
+            continue
+        for layer in rendered_layers:
+            if layer.kind == layer_kind:
+                _draw_rendered_layer(board_image, layer, bounds, settings, options)
     return _tile_image(board_image, settings.tile_x, settings.tile_y)
+
+
+def _draw_rendered_layer(
+    image: Image.Image,
+    layer: RenderedLayer,
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+):
+    layer_image = _apply_alpha(layer.image, _layer_alpha_percent(layer.kind, options))
+    layer_bounds = _transform_bounds(layer.bounds, settings)
+    left = round((layer_bounds.min_x - bounds.min_x) * options.dpmm)
+    if _mirror_preview(options):
+        layer_image = layer_image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        left = image.width - left - layer_image.width
+    top = round((bounds.max_y - layer_bounds.max_y) * options.dpmm)
+    image.alpha_composite(layer_image, (left, top))
+
+
+def _layer_paint_order(side: PreviewSide) -> tuple[PreviewLayerKind, ...]:
+    if side == PreviewSide.BACK:
+        return (
+            PreviewLayerKind.FRONT,
+            PreviewLayerKind.BACK,
+            PreviewLayerKind.DRILL,
+            PreviewLayerKind.CUTOFF,
+            PreviewLayerKind.AUX,
+        )
+    return (
+        PreviewLayerKind.BACK,
+        PreviewLayerKind.FRONT,
+        PreviewLayerKind.DRILL,
+        PreviewLayerKind.CUTOFF,
+        PreviewLayerKind.AUX,
+    )
+
+
+def _layer_alpha_percent(kind: PreviewLayerKind, options: PreviewOptions) -> int:
+    if kind == PreviewLayerKind.FRONT and options.side == PreviewSide.FRONT:
+        return options.layer_alpha
+    if kind == PreviewLayerKind.BACK and options.side == PreviewSide.BACK:
+        return options.layer_alpha
+    return 100
+
+
+def _mirror_preview(options: PreviewOptions) -> bool:
+    return options.side == PreviewSide.BACK
 
 
 def _preview_canvas_size(
@@ -760,10 +807,12 @@ def _draw_drills(
     options: PreviewOptions,
 ):
     draw = ImageDraw.Draw(image)
-    drill_alpha = round(MAX_ALPHA * max(0, min(options.layer_alpha, 100)) / 100)
+    drill_alpha = _alpha_value(options.layer_alpha)
     for hit in drill_layer.hits:
         x_value, y_value = _transform_point(hit.x_mm, hit.y_mm, settings)
         radius = max(hit.diameter_mm * options.dpmm / 2, 2)
+        if _mirror_preview(options):
+            x_value = bounds.max_x - x_value + bounds.min_x
         center_x = (x_value - bounds.min_x) * options.dpmm
         center_y = (bounds.max_y - y_value) * options.dpmm
         draw.ellipse(

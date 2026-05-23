@@ -43,13 +43,24 @@ visibility toggles for front, back, drill, cutoff/outline, and Aux. Aux is one p
 Gerber file and is not saved to `millproject`.
 
 All enabled layers are composed into one shared board coordinate system. Front copper is tinted
-green/cyan, back copper amber/orange, cutoff light gray, Aux blue, and drill hits light blue.
-Preview layers are not mirrored; mirror-related options are left to `pcb2gcode` generation.
+green/cyan, back copper red/pink, cutoff light gray, Aux blue, and drill hits light blue. The
+front/back selector controls the viewing side, not which layers are loaded. In front view the
+paint order is back, front, drill, cutoff, Aux. In back view the paint order is front, back,
+drill, cutoff, Aux, and the entire composed layout is mirrored horizontally.
+
+The transparency slider applies only to the active copper side and drill hits: front plus drill
+in front view, back plus drill in back view. The inactive copper side, cutoff, and Aux stay fully
+opaque so reference geometry remains readable.
 
 Preview transforms follow the pcb2gcode options that affect placement: `metric`, `x-offset`,
-`y-offset`, `zero-start`, `tile-x`, and `tile-y`. Drill rendering uses a narrow preview-only Excellon reader for common decimal
-`METRIC`/`INCH` files with `TnnCdiameter` tools and `X...Y...` hits. Unsupported drill syntax is
-reported as a preview warning and does not affect validation or NC generation.
+`y-offset`, `zero-start`, `tile-x`, and `tile-y`. Mirror-related pcb2gcode generation options are
+not applied directly; the back preview side uses its own horizontal view mirror.
+
+Drill rendering uses a narrow preview-only Excellon reader for common decimal and implied-decimal
+`METRIC`/`INCH` files with `TnnCdiameter` tools and `X...Y...` hits. Cutoff rendering first uses
+PyGerber; if PyGerber rejects a simple EAGLE-style profile, the app falls back to a line-segment
+RS-274X reader for circular-aperture `D02`/`D01` outlines. Unsupported preview syntax is reported
+as a warning and does not affect validation or NC generation.
 
 ## Validation
 

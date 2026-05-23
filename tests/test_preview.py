@@ -5,9 +5,12 @@ from PIL import Image
 
 from pcb2gcode_ui.preview import (
     Bounds,
+    DrillHit,
+    DrillLayer,
     GerberPreviewRenderer,
     PreviewLayerKind,
     PreviewOptions,
+    PreviewSide,
     RenderedLayer,
     TransformSettings,
     _apply_alpha,
@@ -94,6 +97,229 @@ def test_compose_preview_places_layers_in_shared_coordinate_system():
 
     assert image.getpixel((5, 5))[:3] == front_color
     assert image.getpixel((25, 5))[:3] == back_color
+
+
+def test_compose_preview_front_side_paints_front_over_back():
+    front_color = _layer_color(PreviewLayerKind.FRONT)
+    back_color = _layer_color(PreviewLayerKind.BACK)
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*front_color, 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    back_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*back_color, 255)),
+        kind=PreviewLayerKind.BACK,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    settings = _preview_settings(Bounds(0, 0, 1, 1))
+
+    image = _compose_preview(
+        [front_layer, back_layer],
+        None,
+        Bounds(0, 0, 1, 1),
+        settings,
+        PreviewOptions(show_drill=False, show_cutoff=False, dpmm=1, layer_alpha=100),
+    )
+
+    assert image.getpixel((0, 0))[:3] == front_color
+
+
+def test_compose_preview_back_side_paints_back_over_front():
+    front_color = _layer_color(PreviewLayerKind.FRONT)
+    back_color = _layer_color(PreviewLayerKind.BACK)
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*front_color, 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    back_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*back_color, 255)),
+        kind=PreviewLayerKind.BACK,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    settings = _preview_settings(Bounds(0, 0, 1, 1))
+
+    image = _compose_preview(
+        [front_layer, back_layer],
+        None,
+        Bounds(0, 0, 1, 1),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=1,
+            layer_alpha=100,
+        ),
+    )
+
+    assert image.getpixel((0, 0))[:3] == back_color
+
+
+def test_compose_preview_paints_drill_cutoff_and_aux_after_copper():
+    aux_color = _layer_color(PreviewLayerKind.AUX)
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (5, 5), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 5, 5),
+    )
+    cutoff_layer = RenderedLayer(
+        image=Image.new("RGBA", (5, 5), (*_layer_color(PreviewLayerKind.CUTOFF), 255)),
+        kind=PreviewLayerKind.CUTOFF,
+        bounds=Bounds(0, 0, 5, 5),
+    )
+    aux_layer = RenderedLayer(
+        image=Image.new("RGBA", (5, 5), (*aux_color, 255)),
+        kind=PreviewLayerKind.AUX,
+        bounds=Bounds(0, 0, 5, 5),
+    )
+    drill_layer = DrillLayer([DrillHit(2, 2, 1)], [])
+    settings = _preview_settings(Bounds(0, 0, 5, 5))
+
+    image = _compose_preview(
+        [aux_layer, cutoff_layer, front_layer],
+        drill_layer,
+        Bounds(0, 0, 5, 5),
+        settings,
+        PreviewOptions(dpmm=1, layer_alpha=100),
+    )
+
+    assert image.getpixel((2, 3))[:3] == aux_color
+
+
+def test_compose_preview_front_side_alpha_affects_only_front_and_drill():
+    front_color = _layer_color(PreviewLayerKind.FRONT)
+    back_color = _layer_color(PreviewLayerKind.BACK)
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*front_color, 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    back_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*back_color, 255)),
+        kind=PreviewLayerKind.BACK,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    settings = _preview_settings(Bounds(0, 0, 1, 1))
+
+    image = _compose_preview(
+        [front_layer, back_layer],
+        None,
+        Bounds(0, 0, 1, 1),
+        settings,
+        PreviewOptions(show_drill=False, show_cutoff=False, dpmm=1, layer_alpha=50),
+    )
+
+    expected = Image.new("RGBA", (1, 1), (*back_color, 255))
+    expected.alpha_composite(_apply_alpha(Image.new("RGBA", (1, 1), (*front_color, 255)), 50))
+    assert image.getpixel((0, 0)) == expected.getpixel((0, 0))
+
+
+def test_compose_preview_back_side_alpha_affects_only_back_and_drill():
+    front_color = _layer_color(PreviewLayerKind.FRONT)
+    back_color = _layer_color(PreviewLayerKind.BACK)
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*front_color, 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    back_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*back_color, 255)),
+        kind=PreviewLayerKind.BACK,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    settings = _preview_settings(Bounds(0, 0, 1, 1))
+
+    image = _compose_preview(
+        [front_layer, back_layer],
+        None,
+        Bounds(0, 0, 1, 1),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=1,
+            layer_alpha=50,
+        ),
+    )
+
+    expected = Image.new("RGBA", (1, 1), (*front_color, 255))
+    expected.alpha_composite(_apply_alpha(Image.new("RGBA", (1, 1), (*back_color, 255)), 50))
+    assert image.getpixel((0, 0)) == expected.getpixel((0, 0))
+
+
+def test_compose_preview_back_side_mirrors_all_layers_horizontally():
+    front_color = _layer_color(PreviewLayerKind.FRONT)
+    layer_image = Image.new("RGBA", (2, 1), (0, 0, 0, 0))
+    layer_image.putpixel((0, 0), (*front_color, 255))
+    front_layer = RenderedLayer(
+        image=layer_image,
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 2, 1),
+    )
+    settings = _preview_settings(Bounds(0, 0, 2, 1))
+
+    image = _compose_preview(
+        [front_layer],
+        None,
+        Bounds(0, 0, 2, 1),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=1,
+            layer_alpha=100,
+        ),
+    )
+
+    assert image.getpixel((1, 0))[:3] == front_color
+
+
+def test_compose_preview_back_side_mirrors_drills_horizontally():
+    drill_color = (87, 178, 255)
+    drill_layer = DrillLayer([DrillHit(2, 5, 1)], [])
+    settings = _preview_settings(Bounds(0, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        drill_layer,
+        Bounds(0, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_back=False,
+            show_cutoff=False,
+            dpmm=1,
+            layer_alpha=100,
+        ),
+    )
+
+    assert image.getpixel((8, 5))[:3] == drill_color
+
+
+def test_compose_preview_alpha_affects_drill():
+    drill_layer = DrillLayer([DrillHit(5, 5, 1)], [])
+    settings = _preview_settings(Bounds(0, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        drill_layer,
+        Bounds(0, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_back=False,
+            show_cutoff=False,
+            dpmm=1,
+            layer_alpha=50,
+        ),
+    )
+
+    assert image.getpixel((5, 5)) == (87, 178, 255, 128)
 
 
 def test_compose_preview_does_not_mirror_back_layer():
@@ -330,3 +556,15 @@ def test_transform_point_applies_zero_start_offsets():
     )
 
     assert _transform_point(6, 12, settings) == (2, 4)
+
+
+def _preview_settings(bounds: Bounds) -> TransformSettings:
+    return TransformSettings(
+        metric=True,
+        zero_start=False,
+        x_offset_mm=0,
+        y_offset_mm=0,
+        tile_x=1,
+        tile_y=1,
+        board_bounds=bounds,
+    )
