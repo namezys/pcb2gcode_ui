@@ -40,10 +40,11 @@ PyGerber's Python API (`pygerber.gerberx3.api.v2`) to parse and rasterize Gerber
 memory at high density. The app composes the PNG with Pillow and shows it directly in Flet,
 without invoking the PyGerber CLI or writing preview files.
 
-The preview window uses two compact control rows. The first row has the front/back view selector,
+The preview window uses compact control rows. The first row has the front/back view selector,
 transparency slider, Load Aux button, and Regenerate button. The second row has horizontal
 visibility toggles for front, back, drill, cutoff/outline, and Aux. Aux is one preview-only
-Gerber file and is not saved to `millproject`.
+Gerber file and is not saved to `millproject`. The third row loads generated NC files and toggles
+G-code movement preview by output type.
 
 All enabled layers are composed into one shared board coordinate system. Front copper is tinted
 green/cyan, back copper red/pink, cutoff light gray, Aux blue, and drill hits light blue. The
@@ -64,6 +65,11 @@ Drill rendering uses a narrow preview-only Excellon reader for common decimal an
 PyGerber; if PyGerber rejects a simple EAGLE-style profile, the app falls back to a line-segment
 RS-274X reader for circular-aperture `D02`/`D01` outlines. Unsupported preview syntax is reported
 as a warning and does not affect validation or NC generation.
+
+G-code preview reads configured output files from the output directory using `gcodeparser` plus a
+small local movement interpreter. It draws only linear `G0`/`G1` traces: endpoint `Z < 0` is a cut,
+and endpoint `Z >= 0` is a retract/travel move. Cut lines are bright; retract/travel lines are
+low-visibility dashed gray. See [gcode-preview.md](gcode-preview.md) for the supported subset.
 
 ## Validation
 

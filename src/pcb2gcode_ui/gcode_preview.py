@@ -1,0 +1,328 @@
+import logging
+import os
+import re
+from dataclasses import dataclass
+from enum import StrEnum
+from pathlib import Path
+
+from gcodeparser import GcodeLine, parse_gcode_lines
+
+from pcb2gcode_ui.options import default_output_directory
+
+LOGGER = logging.getLogger(__name__)
+UNIT_MM = "mm"
+UNIT_INCH = "inch"
+INCH_TO_MM = 25.4
+DEFAULT_TOOL_ID = "none"
+MOVEMENT_COMMANDS = {0, 1}
+SUPPORTED_G_CODES = {0, 1, 20, 21, 90, 91}
+SUPPORTED_M_CODES = {6}
+COORDINATE_ONLY_RE = re.compile(r"^\s*[XYZFIJKR][+-]?\d", re.IGNORECASE)
+OUTPUT_OPTIONS = (
+    ("front", "front-output"),
+    ("back", "back-output"),
+    ("drill", "drill-output"),
+    ("milldrill", "milldrill-output"),
+    ("outline", "outline-output"),
+)
+
+
+class GcodeMovementKind(StrEnum):
+    CUT = "cut"
+    RETRACT = "retract"
+
+
+@dataclass(frozen=True)
+class GcodePoint:
+    x_mm: float
+    y_mm: float
+    z_mm: float
+
+
+@dataclass(frozen=True)
+class GcodeSegment:
+    start: GcodePoint
+    end: GcodePoint
+    movement: GcodeMovementKind
+    tool_id: str
+    source_kind: str
+    line_number: int
+
+
+@dataclass(frozen=True)
+class GcodeBounds:
+    min_x: float
+    min_y: float
+    max_x: float
+    max_y: float
+
+
+@dataclass(frozen=True)
+class GcodeTrace:
+    segments: list[GcodeSegment]
+    warnings: list[str]
+
+    @property
+    def cut_count(self) -> int:
+        return sum(1 for segment in self.segments if segment.movement == GcodeMovementKind.CUT)
+
+    @property
+    def retract_count(self) -> int:
+        return sum(
+            1 for segment in self.segments if segment.movement == GcodeMovementKind.RETRACT
+        )
+
+    @property
+    def tools(self) -> tuple[str, ...]:
+        return tuple(sorted({segment.tool_id for segment in self.segments}))
+
+    @property
+    def bounds(self) -> GcodeBounds:
+        points = [
+            point
+            for segment in self.segments
+            for point in (segment.start, segment.end)
+        ]
+        return GcodeBounds(
+            min(point.x_mm for point in points),
+            min(point.y_mm for point in points),
+            max(point.x_mm for point in points),
+            max(point.y_mm for point in points),
+        )
+
+    def filtered(self, source_kinds: set[str]) -> "GcodeTrace":
+        return GcodeTrace(
+            [segment for segment in self.segments if segment.source_kind in source_kinds],
+            self.warnings,
+        )
+
+
+@dataclass
+class InterpreterState:
+    position: GcodePoint
+    unit: str = UNIT_MM
+    absolute: bool = True
+    active_movement: int = 0
+    active_tool: str = DEFAULT_TOOL_ID
+
+
+class GcodeInterpreter:
+    def parse_file(self, path: Path, source_kind: str) -> GcodeTrace:
+        try:
+            raw_text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError as error:
+            return GcodeTrace([], [f"Could not read {path.name}: {error}"])
+        trace = self.parse(raw_text, source_kind)
+        LOGGER.debug(
+            "Parsed %s G-code segment(s) from %r as %s",
+            len(trace.segments),
+            path,
+            source_kind,
+        )
+        return trace
+
+    def parse(self, text: str, source_kind: str) -> GcodeTrace:
+        state = InterpreterState(GcodePoint(0, 0, 0))
+        segments: list[GcodeSegment] = []
+        warnings: list[str] = []
+        unsupported_commands: set[str] = set()
+
+        for line_number, raw_line in enumerate(text.splitlines(), start=1):
+            line = _normalize_modal_line(raw_line, state.active_movement)
+            for parsed_line in parse_gcode_lines(line):
+                self._process_line(
+                    parsed_line,
+                    line_number,
+                    source_kind,
+                    state,
+                    segments,
+                    unsupported_commands,
+                )
+        warnings.extend(
+            f"Ignored unsupported command {command}."
+            for command in sorted(unsupported_commands)
+        )
+        return GcodeTrace(segments, warnings)
+
+    def _process_line(
+        self,
+        line: GcodeLine,
+        line_number: int,
+        source_kind: str,
+        state: InterpreterState,
+        segments: list[GcodeSegment],
+        unsupported_commands: set[str],
+    ):
+        command_letter, command_number = line.command
+        if command_letter == "G":
+            self._process_g_code(
+                command_number,
+                line,
+                line_number,
+                source_kind,
+                state,
+                segments,
+                unsupported_commands,
+            )
+        elif command_letter == "T" and command_number is not None:
+            state.active_tool = str(command_number)
+        elif command_letter == "M" and command_number not in SUPPORTED_M_CODES:
+            unsupported_commands.add(f"M{command_number}")
+
+    def _process_g_code(
+        self,
+        command_number: int,
+        line: GcodeLine,
+        line_number: int,
+        source_kind: str,
+        state: InterpreterState,
+        segments: list[GcodeSegment],
+        unsupported_commands: set[str],
+    ):
+        if command_number not in SUPPORTED_G_CODES:
+            unsupported_commands.add(f"G{command_number}")
+            return
+        if command_number == 20:
+            state.unit = UNIT_INCH
+            return
+        if command_number == 21:
+            state.unit = UNIT_MM
+            return
+        if command_number == 90:
+            state.absolute = True
+            return
+        if command_number == 91:
+            state.absolute = False
+            return
+        if command_number in MOVEMENT_COMMANDS:
+            state.active_movement = command_number
+            self._move(line, line_number, source_kind, state, segments)
+
+    def _move(
+        self,
+        line: GcodeLine,
+        line_number: int,
+        source_kind: str,
+        state: InterpreterState,
+        segments: list[GcodeSegment],
+    ):
+        next_position = _next_position(state, line.params)
+        if next_position == state.position:
+            return
+        movement = (
+            GcodeMovementKind.CUT
+            if next_position.z_mm < 0
+            else GcodeMovementKind.RETRACT
+        )
+        segments.append(
+            GcodeSegment(
+                start=state.position,
+                end=next_position,
+                movement=movement,
+                tool_id=state.active_tool,
+                source_kind=source_kind,
+                line_number=line_number,
+            )
+        )
+        state.position = next_position
+
+
+def load_gcode_trace(
+    values: dict[str, str],
+    base_dir: Path,
+    source_kinds: set[str] = None,
+) -> GcodeTrace:
+    interpreter = GcodeInterpreter()
+    segments: list[GcodeSegment] = []
+    warnings: list[str] = []
+    for source_kind, option_key in OUTPUT_OPTIONS:
+        if source_kinds and source_kind not in source_kinds:
+            continue
+        path = _output_path(values, option_key, base_dir)
+        if not path.exists():
+            warnings.append(f"Missing {source_kind} NC file: {path}")
+            continue
+        trace = interpreter.parse_file(path, source_kind)
+        segments.extend(trace.segments)
+        warnings.extend(trace.warnings)
+    return GcodeTrace(segments, warnings)
+
+
+def gcode_trace_summary(trace: GcodeTrace) -> str:
+    tools = ", ".join(trace.tools) if trace.tools else "none"
+    return (
+        f"G-code: {len(trace.segments)} segment(s), "
+        f"{trace.cut_count} cut, {trace.retract_count} retract, tools: {tools}."
+    )
+
+
+def _normalize_modal_line(raw_line: str, active_movement: int) -> str:
+    if COORDINATE_ONLY_RE.match(raw_line):
+        return f"G{active_movement} {raw_line}"
+    return raw_line
+
+
+def _next_position(state: InterpreterState, params: dict[str, float]) -> GcodePoint:
+    x_value = _axis_value("X", state.position.x_mm, params, state)
+    y_value = _axis_value("Y", state.position.y_mm, params, state)
+    z_value = _axis_value("Z", state.position.z_mm, params, state)
+    return GcodePoint(x_value, y_value, z_value)
+
+
+def _axis_value(
+    axis: str,
+    current_value: float,
+    params: dict[str, float],
+    state: InterpreterState,
+) -> float:
+    if axis not in params:
+        return current_value
+    value = _unit_to_mm(float(params[axis]), state.unit)
+    if state.absolute:
+        return value
+    return current_value + value
+
+
+def _output_path(values: dict[str, str], option_key: str, base_dir: Path) -> Path:
+    output_value = values.get("output-dir", "").strip()
+    output_dir = (
+        _resolve_path(output_value, base_dir)
+        if output_value
+        else _default_output_directory(values, base_dir)
+    )
+    file_name = values.get(option_key, "").strip()
+    if not file_name:
+        file_name = _default_output_name(option_key)
+    return _resolve_path(file_name, output_dir)
+
+
+def _default_output_directory(values: dict[str, str], base_dir: Path) -> Path:
+    for key in ("front", "back", "drill", "outline"):
+        value = values.get(key, "").strip()
+        if value:
+            return _resolve_path(value, base_dir).parent / "nc"
+    return default_output_directory(values)
+
+
+def _default_output_name(option_key: str) -> str:
+    defaults = {
+        "front-output": "front.ngc",
+        "back-output": "back.ngc",
+        "drill-output": "drill.ngc",
+        "milldrill-output": "milldrill.ngc",
+        "outline-output": "outline.ngc",
+    }
+    return defaults[option_key]
+
+
+def _resolve_path(value: str, base_dir: Path) -> Path:
+    path = Path(os.path.expanduser(value))
+    if path.is_absolute():
+        return path
+    return base_dir / path
+
+
+def _unit_to_mm(value: float, unit: str) -> float:
+    if unit == UNIT_INCH:
+        return value * INCH_TO_MM
+    return value

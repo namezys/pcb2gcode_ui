@@ -17,6 +17,7 @@ from pygerber.gerberx3.api.v2 import (
     PixelFormatEnum,
 )
 
+from pcb2gcode_ui.gcode_preview import GcodeMovementKind, GcodeSegment, GcodeTrace
 from pcb2gcode_ui.options import bool_value
 
 LOGGER = logging.getLogger(__name__)
@@ -65,7 +66,9 @@ class PreviewOptions:
     show_drill: bool = True
     show_cutoff: bool = True
     show_aux: bool = True
+    show_gcode: bool = False
     aux_layer: Path = None
+    gcode_trace: GcodeTrace = None
     layer_alpha: int = DEFAULT_LAYER_ALPHA
     dpmm: int = DEFAULT_PREVIEW_DPMM
 
@@ -187,16 +190,22 @@ class GerberPreviewRenderer:
         warnings: list[str] = []
         gerber_layers = _collect_gerber_layers(values, base_dir, options, warnings)
         drill_layer = _collect_drill_layer(values, base_dir, options, warnings)
-        if not gerber_layers and not drill_layer:
+        gcode_trace = options.gcode_trace if options.show_gcode else None
+        if not gerber_layers and not drill_layer and not _has_gcode(gcode_trace):
             return PreviewResult(b"", warnings or ["No visible preview layers."], 0)
 
         rendered_layers = self._render_gerber_layers(gerber_layers, options, warnings)
-        source_bounds = _source_bounds(rendered_layers, drill_layer)
+        source_bounds = _source_bounds(rendered_layers, drill_layer, gcode_trace)
         if not source_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
 
         settings = _transform_settings(values, source_bounds)
-        transformed_bounds = _transformed_bounds(rendered_layers, drill_layer, settings)
+        transformed_bounds = _transformed_bounds(
+            rendered_layers,
+            drill_layer,
+            settings,
+            gcode_trace,
+        )
         if not transformed_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
 
@@ -227,9 +236,14 @@ class GerberPreviewRenderer:
             transformed_bounds,
             settings,
             options,
+            gcode_trace,
         )
         png = _png_bytes(image)
-        layer_count = len(rendered_layers) + (1 if drill_layer and drill_layer.hits else 0)
+        layer_count = (
+            len(rendered_layers)
+            + (1 if drill_layer and drill_layer.hits else 0)
+            + (1 if _has_gcode(gcode_trace) else 0)
+        )
         return PreviewResult(png, warnings, layer_count)
 
     def _render_gerber_layers(
@@ -627,6 +641,7 @@ def _bounds_from_parsed_file(parsed_file: ParsedFile) -> Bounds:
 def _source_bounds(
     rendered_layers: list[RenderedLayer],
     drill_layer: DrillLayer | None,
+    gcode_trace: GcodeTrace = None,
 ) -> Bounds | None:
     bounds: Bounds = None
     for layer in rendered_layers:
@@ -634,6 +649,9 @@ def _source_bounds(
     if drill_layer and drill_layer.hits:
         drill_bounds = _drill_bounds(drill_layer.hits)
         bounds = drill_bounds if bounds is None else bounds.expand(drill_bounds)
+    if _has_gcode(gcode_trace):
+        trace_bounds = _gcode_bounds(gcode_trace)
+        bounds = trace_bounds if bounds is None else bounds.expand(trace_bounds)
     return bounds
 
 
@@ -662,6 +680,7 @@ def _transformed_bounds(
     rendered_layers: list[RenderedLayer],
     drill_layer: DrillLayer | None,
     settings: TransformSettings,
+    gcode_trace: GcodeTrace = None,
 ) -> Bounds | None:
     bounds: Bounds = None
     for layer in rendered_layers:
@@ -679,6 +698,19 @@ def _transformed_bounds(
             max(point[1] for point in points),
         )
         bounds = drill_bounds if bounds is None else bounds.expand(drill_bounds)
+    if _has_gcode(gcode_trace):
+        points = [
+            _transform_point(point.x_mm, point.y_mm, settings)
+            for segment in gcode_trace.segments
+            for point in (segment.start, segment.end)
+        ]
+        trace_bounds = Bounds(
+            min(point[0] for point in points),
+            min(point[1] for point in points),
+            max(point[0] for point in points),
+            max(point[1] for point in points),
+        )
+        bounds = trace_bounds if bounds is None else bounds.expand(trace_bounds)
     if bounds is None:
         return None
     return Bounds(
@@ -725,6 +757,7 @@ def _compose_preview(
     bounds: Bounds,
     settings: TransformSettings,
     options: PreviewOptions,
+    gcode_trace: GcodeTrace = None,
 ) -> Image.Image:
     width_px = max(math.ceil(bounds.width * options.dpmm), MIN_CANVAS_SIZE)
     height_px = max(math.ceil(bounds.height * options.dpmm), MIN_CANVAS_SIZE)
@@ -737,6 +770,8 @@ def _compose_preview(
         for layer in rendered_layers:
             if layer.kind == layer_kind:
                 _draw_rendered_layer(board_image, layer, bounds, settings, options)
+    if options.show_gcode and _has_gcode(gcode_trace):
+        _draw_gcode_trace(board_image, gcode_trace, bounds, settings, options)
     return _tile_image(board_image, settings.tile_x, settings.tile_y)
 
 
@@ -826,6 +861,108 @@ def _draw_drills(
             outline=(220, 245, 255, 255),
             width=1,
         )
+
+
+def _draw_gcode_trace(
+    image: Image.Image,
+    trace: GcodeTrace,
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+):
+    draw = ImageDraw.Draw(image)
+    for segment in trace.segments:
+        start = _preview_point(segment.start.x_mm, segment.start.y_mm, bounds, settings, options)
+        end = _preview_point(segment.end.x_mm, segment.end.y_mm, bounds, settings, options)
+        if segment.movement == GcodeMovementKind.CUT:
+            draw.line(
+                (start, end),
+                fill=_gcode_cut_color(segment),
+                width=max(round(options.dpmm * 0.08), 2),
+            )
+        else:
+            _draw_dashed_line(
+                draw,
+                start,
+                end,
+                fill=(170, 178, 184, 85),
+                width=max(round(options.dpmm * 0.04), 1),
+                dash_px=max(round(options.dpmm * 0.6), 4),
+                gap_px=max(round(options.dpmm * 0.35), 3),
+            )
+
+
+def _preview_point(
+    x_value: float,
+    y_value: float,
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+) -> tuple[float, float]:
+    transformed_x, transformed_y = _transform_point(x_value, y_value, settings)
+    if _mirror_preview(options):
+        transformed_x = bounds.max_x - transformed_x + bounds.min_x
+    return (
+        (transformed_x - bounds.min_x) * options.dpmm,
+        (bounds.max_y - transformed_y) * options.dpmm,
+    )
+
+
+def _draw_dashed_line(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    fill: tuple[int, int, int, int],
+    width: int,
+    dash_px: int,
+    gap_px: int,
+):
+    distance_x = end[0] - start[0]
+    distance_y = end[1] - start[1]
+    line_length = math.hypot(distance_x, distance_y)
+    if line_length == 0:
+        return
+    step = dash_px + gap_px
+    position = 0.0
+    while position < line_length:
+        dash_end = min(position + dash_px, line_length)
+        first_ratio = position / line_length
+        second_ratio = dash_end / line_length
+        draw.line(
+            (
+                (
+                    start[0] + distance_x * first_ratio,
+                    start[1] + distance_y * first_ratio,
+                ),
+                (
+                    start[0] + distance_x * second_ratio,
+                    start[1] + distance_y * second_ratio,
+                ),
+            ),
+            fill=fill,
+            width=width,
+        )
+        position += step
+
+
+def _gcode_cut_color(segment: GcodeSegment) -> tuple[int, int, int, int]:
+    colors = {
+        "front": (255, 214, 78, 230),
+        "back": (255, 105, 135, 230),
+        "drill": (90, 210, 255, 235),
+        "milldrill": (150, 185, 255, 235),
+        "outline": (255, 255, 255, 240),
+    }
+    return colors.get(segment.source_kind, (255, 214, 78, 230))
+
+
+def _has_gcode(trace: GcodeTrace = None) -> bool:
+    return bool(trace and trace.segments)
+
+
+def _gcode_bounds(trace: GcodeTrace) -> Bounds:
+    bounds = trace.bounds
+    return Bounds(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y)
 
 
 def _tile_image(image: Image.Image, tile_x: int, tile_y: int) -> Image.Image:

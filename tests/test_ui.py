@@ -77,6 +77,8 @@ class FakePreviewRenderer:
     def __init__(self):
         self.base_dir: Path = None
         self.aux_layer: Path = None
+        self.gcode_trace = None
+        self.show_gcode = False
         self.show_front = False
         self.show_back = False
         self.layer_alpha = 0
@@ -85,6 +87,8 @@ class FakePreviewRenderer:
     def render(self, _values, base_dir: Path, options) -> PreviewResult:
         self.base_dir = base_dir
         self.aux_layer = options.aux_layer
+        self.gcode_trace = options.gcode_trace
+        self.show_gcode = options.show_gcode
         self.show_front = options.show_front
         self.show_back = options.show_back
         self.layer_alpha = options.layer_alpha
@@ -241,6 +245,39 @@ def test_pick_aux_layer_is_preview_only_and_single_file(tmp_path: Path):
 
     assert app.preview_aux_layer == aux_path
     assert app.preview_renderer.aux_layer == aux_path
+
+
+def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
+    output_dir = tmp_path / "nc"
+    output_dir.mkdir()
+    (output_dir / "front.ngc").write_text("G21\nT1 M6\nG0 X0 Y0 Z1\nG1 Z-0.1\nX1\n")
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+    app.values["output-dir"] = str(output_dir)
+    app.preview_gcode_back.value = False
+    app.preview_gcode_drill.value = False
+    app.preview_gcode_milldrill.value = False
+    app.preview_gcode_outline.value = False
+
+    app._load_gcode_outputs(None)
+
+    assert app.preview_gcode.value is True
+    assert app.gcode_trace
+    assert "3 segment" in app.gcode_status.value
+    assert app.preview_renderer.show_gcode is True
+    assert app.preview_renderer.gcode_trace.segments
+
+
+def test_gcode_visibility_checkbox_controls_render_options():
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+
+    app._load_gcode_outputs(None)
+    app.preview_gcode.value = False
+    app._refresh_preview(None)
+
+    assert app.preview_renderer.show_gcode is False
+    assert app.preview_renderer.gcode_trace is None
 
 
 def _app() -> Pcb2GCodeApp:

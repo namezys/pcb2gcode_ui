@@ -4,6 +4,7 @@ from pathlib import Path
 
 import flet as ft
 
+from pcb2gcode_ui.gcode_preview import GcodeTrace, gcode_trace_summary, load_gcode_trace
 from pcb2gcode_ui.help_content import GENERAL_HELP, OPTION_HELP_BY_KEY, option_help_markdown
 from pcb2gcode_ui.millproject import parse_millproject, write_millproject
 from pcb2gcode_ui.options import (
@@ -75,6 +76,7 @@ class Pcb2GCodeApp:
         self.save_picker = ft.FilePicker()
         self.preview_renderer = GerberPreviewRenderer()
         self.preview_aux_layer: Path = None
+        self.gcode_trace: GcodeTrace = None
         self.preview_side = PreviewSide.FRONT
         self.preview_front = ft.Checkbox(
             label="Front",
@@ -106,6 +108,17 @@ class Pcb2GCodeApp:
             label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
+        self.preview_gcode = ft.Checkbox(
+            label="G-code",
+            value=False,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+        self.preview_gcode_front = self._gcode_checkbox("Front")
+        self.preview_gcode_back = self._gcode_checkbox("Back")
+        self.preview_gcode_drill = self._gcode_checkbox("Drill")
+        self.preview_gcode_milldrill = self._gcode_checkbox("Milldrill")
+        self.preview_gcode_outline = self._gcode_checkbox("Outline")
         self.preview_alpha = ft.Slider(
             value=DEFAULT_LAYER_ALPHA,
             min=10,
@@ -120,6 +133,11 @@ class Pcb2GCodeApp:
         )
         self.preview_status = ft.Text(
             "Preview is not rendered yet.",
+            color=MUTED_TEXT_COLOR,
+            size=BODY_TEXT_SIZE,
+        )
+        self.gcode_status = ft.Text(
+            "G-code is not loaded.",
             color=MUTED_TEXT_COLOR,
             size=BODY_TEXT_SIZE,
         )
@@ -264,6 +282,24 @@ class Pcb2GCodeApp:
                     ],
                     wrap=True,
                 ),
+                ft.Row(
+                    [
+                        ft.OutlinedButton(
+                            "Load NC",
+                            icon=ft.Icons.UPLOAD_FILE,
+                            on_click=self._load_gcode_outputs,
+                            style=_button_style(),
+                        ),
+                        self.preview_gcode,
+                        self.preview_gcode_front,
+                        self.preview_gcode_back,
+                        self.preview_gcode_drill,
+                        self.preview_gcode_milldrill,
+                        self.preview_gcode_outline,
+                    ],
+                    wrap=True,
+                ),
+                self.gcode_status,
                 self.preview_status,
                 ft.Container(
                     content=self.preview_image,
@@ -474,6 +510,14 @@ class Pcb2GCodeApp:
         self.controls[spec.key] = dropdown
         return dropdown
 
+    def _gcode_checkbox(self, label: str) -> ft.Checkbox:
+        return ft.Checkbox(
+            label=label,
+            value=True,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+
     def _help_button(self, spec: OptionSpec) -> ft.IconButton:
         return ft.IconButton(
             icon=ft.Icons.QUESTION_MARK,
@@ -579,6 +623,16 @@ class Pcb2GCodeApp:
         self.preview_aux_layer = Path(selected_path)
         self._refresh_preview(_event)
 
+    def _load_gcode_outputs(self, event):
+        self.gcode_trace = load_gcode_trace(
+            self.values,
+            self._base_dir(),
+            self._selected_gcode_sources(),
+        )
+        self.preview_gcode.value = True
+        self._set_gcode_status()
+        self._refresh_preview(event)
+
     def _open_preview(self, event):
         if not self.preview_dialog:
             self.preview_dialog = self._build_preview_dialog()
@@ -653,6 +707,9 @@ class Pcb2GCodeApp:
         self._set_command_result(generation_result)
 
     def _refresh_preview(self, _event):
+        gcode_trace = None
+        if self.gcode_trace and bool(self.preview_gcode.value):
+            gcode_trace = self.gcode_trace.filtered(self._selected_gcode_sources())
         result = self.preview_renderer.render(
             self.values,
             self._base_dir(),
@@ -663,7 +720,9 @@ class Pcb2GCodeApp:
                 show_drill=bool(self.preview_drill.value),
                 show_cutoff=bool(self.preview_cutoff.value),
                 show_aux=bool(self.preview_other.value),
+                show_gcode=bool(self.preview_gcode.value),
                 aux_layer=self.preview_aux_layer,
+                gcode_trace=gcode_trace,
                 layer_alpha=round(self.preview_alpha.value),
             ),
         )
@@ -680,6 +739,31 @@ class Pcb2GCodeApp:
             summary = "\n".join([summary, *result.warnings])
         self.preview_status.value = summary
         self.page.update()
+
+    def _set_gcode_status(self):
+        if not self.gcode_trace:
+            self.gcode_status.value = "G-code is not loaded."
+            return
+        lines = [gcode_trace_summary(self.gcode_trace)]
+        if self.gcode_trace.warnings:
+            lines.extend(self.gcode_trace.warnings[:4])
+            if len(self.gcode_trace.warnings) > 4:
+                lines.append(f"{len(self.gcode_trace.warnings) - 4} more warning(s).")
+        self.gcode_status.value = "\n".join(lines)
+
+    def _selected_gcode_sources(self) -> set[str]:
+        selected: set[str] = set()
+        if self.preview_gcode_front.value:
+            selected.add("front")
+        if self.preview_gcode_back.value:
+            selected.add("back")
+        if self.preview_gcode_drill.value:
+            selected.add("drill")
+        if self.preview_gcode_milldrill.value:
+            selected.add("milldrill")
+        if self.preview_gcode_outline.value:
+            selected.add("outline")
+        return selected
 
     def _show_validation_messages(self, messages: list[ValidationMessage]):
         for control in self.controls.values():
