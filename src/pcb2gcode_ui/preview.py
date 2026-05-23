@@ -21,11 +21,12 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeMovementKind,
     GcodeTrace,
     gcode_instrument_color,
+    gcode_tool_path_id,
 )
 from pcb2gcode_ui.options import bool_value
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_PREVIEW_DPMM = 24
+DEFAULT_PREVIEW_DPMM = 100
 DEFAULT_LAYER_ALPHA = 50
 MAX_ALPHA = 255
 MIN_CANVAS_SIZE = 1
@@ -877,15 +878,15 @@ def _draw_gcode_trace(
     options: PreviewOptions,
 ):
     draw = ImageDraw.Draw(image)
-    instrument_colors = {
-        instrument.id: _hex_to_rgba(gcode_instrument_color(idx), GCODE_CUT_ALPHA)
-        for idx, instrument in enumerate(trace.active_instruments)
+    tool_path_colors = {
+        tool_path.id: _hex_to_rgba(gcode_instrument_color(idx), GCODE_CUT_ALPHA)
+        for idx, tool_path in enumerate(trace.active_tool_paths)
     }
     for segment in trace.segments:
         start = _preview_point(segment.start.x_mm, segment.start.y_mm, bounds, settings, options)
         end = _preview_point(segment.end.x_mm, segment.end.y_mm, bounds, settings, options)
-        color = instrument_colors.get(
-            segment.instrument_id,
+        color = tool_path_colors.get(
+            gcode_tool_path_id(segment.source_kind, segment.tool_id),
             _hex_to_rgba(gcode_instrument_color(0), GCODE_CUT_ALPHA),
         )
         if segment.movement == GcodeMovementKind.CUT:

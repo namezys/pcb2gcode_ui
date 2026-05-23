@@ -11,6 +11,7 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeTrace,
 )
 from pcb2gcode_ui.preview import (
+    DEFAULT_PREVIEW_DPMM,
     Bounds,
     DrillHit,
     DrillLayer,
@@ -27,6 +28,11 @@ from pcb2gcode_ui.preview import (
     _tint_layer_image,
     _transform_point,
 )
+
+
+def test_default_preview_resolution_is_high_quality():
+    assert DEFAULT_PREVIEW_DPMM == 100
+    assert PreviewOptions().dpmm == 100
 
 
 def test_render_preview_uses_pygerber_api_for_example_board():
@@ -372,7 +378,7 @@ def test_compose_preview_draws_gcode_cut_over_retract():
     assert image.getpixel((5, 5))[:3] != (32, 35, 38)
 
 
-def test_compose_preview_colors_gcode_by_instrument():
+def test_compose_preview_colors_gcode_by_tool_path():
     trace = GcodeTrace(
         [
             GcodeSegment(
@@ -393,11 +399,21 @@ def test_compose_preview_colors_gcode_by_instrument():
                 2,
                 "front-2",
             ),
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(10, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "2",
+                "front",
+                3,
+                "front-3",
+            ),
         ],
         [],
         [
             GcodeInstrument("front-1", "1", "front", 1, 1),
             GcodeInstrument("front-2", "1", "front", 2, 2),
+            GcodeInstrument("front-3", "2", "front", 3, 3),
         ],
     )
     settings = _preview_settings(Bounds(0, 0, 10, 10))
@@ -411,7 +427,8 @@ def test_compose_preview_colors_gcode_by_instrument():
         trace,
     )
 
-    assert image.getpixel((120, 192))[:3] != image.getpixel((120, 48))[:3]
+    assert image.getpixel((500, 800))[:3] == image.getpixel((500, 200))[:3]
+    assert image.getpixel((500, 500))[:3] != image.getpixel((500, 200))[:3]
 
 
 def test_compose_preview_draws_retract_as_dots():
@@ -677,8 +694,8 @@ def test_render_preview_with_implied_decimal_drill_file(tmp_path: Path):
 
     assert result.ok
     image = Image.open(BytesIO(result.png))
-    assert image.width < 300
-    assert image.height < 300
+    assert image.width < 700
+    assert image.height < 500
 
 
 def test_render_preview_rejects_oversized_canvas(monkeypatch, tmp_path: Path):

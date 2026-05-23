@@ -83,8 +83,9 @@ PREVIEW_HELP = GeneralHelp(
         "Gerber, drill, cutoff, Aux, and G-code traces are drawn in one shared coordinate "
         "system. Preview follows placement-related settings such as metric input, offsets, "
         "zero-start, and tiling. G-code preview is a visual aid: it currently draws linear "
-        "`G0`/`G1` movement only, treats endpoint `Z < 0` as a cut, and keeps generated NC "
-        "files as the source of truth."
+        "`G0`/`G1` movement only, treats a segment as a cut when either endpoint has "
+        "`Z < 0`, colors paths by active tool id per NC file, and keeps generated NC files as "
+        "the source of truth."
     ),
 )
 

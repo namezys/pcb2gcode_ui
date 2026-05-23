@@ -4,6 +4,11 @@ from pathlib import Path
 
 import flet as ft
 
+from pcb2gcode_ui.gcode_preview import (
+    GcodeInterpreter,
+    GcodeTrace,
+    gcode_instrument_color,
+)
 from pcb2gcode_ui.help_content import OPTION_HELP_BY_KEY
 from pcb2gcode_ui.millproject import parse_millproject
 from pcb2gcode_ui.options import SPEC_BY_KEY
@@ -272,7 +277,15 @@ def test_preview_content_uses_three_compact_control_rows():
     assert all(_is_default_checkbox(control) for control in second_row.controls[1:])
     assert all(_is_default_checkbox(control) for control in third_row.controls[1:])
     assert preview_status is app.preview_status
-    assert preview_canvas.content.controls[0] is app.preview_image
+    interactive_viewer = preview_canvas.content.controls[0]
+    assert isinstance(interactive_viewer, ft.InteractiveViewer)
+    assert interactive_viewer.content is app.preview_image
+    assert interactive_viewer.pan_enabled is True
+    assert interactive_viewer.scale_enabled is True
+    assert interactive_viewer.trackpad_scroll_causes_scale is True
+    assert interactive_viewer.min_scale == 0.5
+    assert interactive_viewer.max_scale == 8.0
+    assert interactive_viewer.constrained is False
     assert preview_canvas.content.controls[1] is app.gcode_instrument_overlay
     assert gcode_status is app.gcode_status
 
@@ -399,9 +412,49 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     assert app.preview_renderer.gcode_trace.segments
     assert app.gcode_instrument_overlay.visible is True
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[0].value == "NC instruments"
+    assert rows[0].value == "NC tools"
+    assert rows[1].controls[0].value == "NC"
+    assert rows[1].controls[1].value == "Path"
+    assert rows[2].controls[0].value == "front"
+    assert rows[2].controls[1].value == "1"
     assert rows[2].controls[2].value == "1"
-    assert rows[3].controls[2].value == "2"
+    assert rows[2].controls[3].value == "3"
+    assert rows[2].controls[4].value == "1"
+    assert rows[2].controls[1].color == gcode_instrument_color(0)
+    assert len(rows) == 3
+
+
+def test_gcode_instrument_overlay_separates_nc_files():
+    app = _app()
+    front_trace = GcodeInterpreter().parse("G21\nT1 M6\nG1 X1 Z-0.1\n", "front")
+    back_trace = GcodeInterpreter().parse("G21\nT2 M6\nG1 X2 Z-0.1\n", "back")
+    trace = GcodeTrace(
+        [*front_trace.segments, *back_trace.segments],
+        [],
+        [*front_trace.instruments, *back_trace.instruments],
+    )
+
+    app._set_gcode_instrument_overlay(trace)
+
+    rows = app.gcode_instrument_overlay.content.controls
+    assert rows[2].controls[0].value == "front"
+    assert isinstance(rows[3], ft.Container)
+    assert rows[4].controls[0].value == "back"
+
+
+def test_gcode_instrument_overlay_keeps_initial_tool_path():
+    app = _app()
+    trace = GcodeInterpreter().parse(
+        "G21\nG0 X0 Y0 Z1\nT1 M6\nG1 Z-0.1\nX1\n",
+        "front",
+    )
+
+    app._set_gcode_instrument_overlay(trace)
+
+    rows = app.gcode_instrument_overlay.content.controls
+    assert [row.controls[1].value for row in rows[2:]] == ["1", "2"]
+    assert [row.controls[2].value for row in rows[2:]] == ["none", "1"]
+    assert rows[2].controls[4].value == "1"
 
 
 def test_gcode_visibility_checkbox_controls_render_options():

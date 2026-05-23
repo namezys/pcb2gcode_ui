@@ -71,6 +71,15 @@ class GcodeInstrument:
 
 
 @dataclass(frozen=True)
+class GcodeToolPath:
+    id: str
+    tool_id: str
+    source_kind: str
+    order_index: int
+    line_number: int
+
+
+@dataclass(frozen=True)
 class GcodeBounds:
     min_x: float
     min_y: float
@@ -140,6 +149,38 @@ class GcodeTrace:
 
     def instrument_counts(self, instrument_id: str) -> tuple[int, int]:
         segments = [segment for segment in self.segments if segment.instrument_id == instrument_id]
+        cut_count = sum(1 for segment in segments if segment.movement == GcodeMovementKind.CUT)
+        retract_count = sum(
+            1 for segment in segments if segment.movement == GcodeMovementKind.RETRACT
+        )
+        return cut_count, retract_count
+
+    @property
+    def active_tool_paths(self) -> tuple[GcodeToolPath, ...]:
+        tool_paths: list[GcodeToolPath] = []
+        seen_ids: set[str] = set()
+        for segment in self.segments:
+            id = gcode_tool_path_id(segment.source_kind, segment.tool_id)
+            if id in seen_ids:
+                continue
+            seen_ids.add(id)
+            tool_paths.append(
+                GcodeToolPath(
+                    id=id,
+                    tool_id=segment.tool_id,
+                    source_kind=segment.source_kind,
+                    order_index=len(tool_paths),
+                    line_number=segment.line_number,
+                )
+            )
+        return tuple(tool_paths)
+
+    def tool_path_counts(self, tool_path_id: str) -> tuple[int, int]:
+        segments = [
+            segment
+            for segment in self.segments
+            if gcode_tool_path_id(segment.source_kind, segment.tool_id) == tool_path_id
+        ]
         cut_count = sum(1 for segment in segments if segment.movement == GcodeMovementKind.CUT)
         retract_count = sum(
             1 for segment in segments if segment.movement == GcodeMovementKind.RETRACT
@@ -294,11 +335,7 @@ class GcodeInterpreter:
         next_position = _next_position(state, line.params)
         if next_position == state.position:
             return
-        movement = (
-            GcodeMovementKind.CUT
-            if next_position.z_mm < 0
-            else GcodeMovementKind.RETRACT
-        )
+        movement = _movement_kind(state.position, next_position)
         segments.append(
             GcodeSegment(
                 start=state.position,
@@ -348,6 +385,12 @@ def gcode_instrument_color(index: int) -> str:
     return GCODE_INSTRUMENT_COLORS[index % len(GCODE_INSTRUMENT_COLORS)]
 
 
+def _movement_kind(start: GcodePoint, end: GcodePoint) -> GcodeMovementKind:
+    if start.z_mm < 0 or end.z_mm < 0:
+        return GcodeMovementKind.CUT
+    return GcodeMovementKind.RETRACT
+
+
 def _normalize_modal_line(raw_line: str, active_movement: int) -> str:
     if COORDINATE_ONLY_RE.match(raw_line):
         return f"G{active_movement} {raw_line}"
@@ -366,15 +409,23 @@ def _implicit_instruments(segments: list[GcodeSegment]) -> list[GcodeInstrument]
         for segment in segments
     }
     return [
-        GcodeInstrument(
-            id=instrument_id,
-            tool_id=DEFAULT_TOOL_ID,
-            source_kind=source_kind,
-            change_index=0,
-            line_number=0,
-        )
+        _implicit_instrument(instrument_id, source_kind)
         for instrument_id, source_kind in sorted(source_by_instrument.items())
     ]
+
+
+def _implicit_instrument(instrument_id: str, source_kind: str) -> GcodeInstrument:
+    return GcodeInstrument(
+        id=instrument_id,
+        tool_id=DEFAULT_TOOL_ID,
+        source_kind=source_kind,
+        change_index=0,
+        line_number=0,
+    )
+
+
+def gcode_tool_path_id(source_kind: str, tool_id: str) -> str:
+    return f"{source_kind}:{tool_id}"
 
 
 def _next_position(state: InterpreterState, params: dict[str, float]) -> GcodePoint:

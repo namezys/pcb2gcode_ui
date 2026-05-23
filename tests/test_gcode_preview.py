@@ -4,6 +4,7 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeInstrument,
     GcodeInterpreter,
     GcodeMovementKind,
+    GcodeToolPath,
     GcodeTrace,
     load_gcode_trace,
 )
@@ -35,7 +36,7 @@ def test_interpreter_parses_units_absolute_modal_moves_and_tools():
     assert trace.instruments == [GcodeInstrument("front-1", "2", "front", 1, 3)]
 
 
-def test_interpreter_treats_every_m6_as_new_instrument():
+def test_interpreter_tracks_m6_but_collects_paths_by_tool():
     trace = GcodeInterpreter().parse(
         "\n".join(
             [
@@ -57,6 +58,10 @@ def test_interpreter_treats_every_m6_as_new_instrument():
         "front-2",
         "front-3",
     ]
+    assert trace.active_tool_paths == (
+        GcodeToolPath("front:2", "2", "front", 0, 2),
+        GcodeToolPath("front:7", "7", "front", 1, 6),
+    )
 
 
 def test_interpreter_supports_inch_and_incremental_modes():
@@ -76,6 +81,57 @@ def test_interpreter_supports_inch_and_incremental_modes():
     assert trace.segments[-1].end.x_mm == 50.8
     assert trace.segments[-1].end.z_mm == -2.54
     assert trace.segments[-1].movement == GcodeMovementKind.CUT
+
+
+def test_interpreter_treats_any_subzero_segment_endpoint_as_cut():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "G21",
+                "G0 X0 Y0 Z1",
+                "G1 Z-0.1",
+                "G1 Z0",
+                "G1 X1",
+            ]
+        ),
+        "front",
+    )
+
+    assert [segment.movement for segment in trace.segments] == [
+        GcodeMovementKind.RETRACT,
+        GcodeMovementKind.CUT,
+        GcodeMovementKind.CUT,
+        GcodeMovementKind.RETRACT,
+    ]
+
+
+def test_interpreter_keeps_initial_path_as_initial_tool():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "G21",
+                "G0 X0 Y0 Z1",
+                "T4 M6",
+                "G1 Z-0.1",
+            ]
+        ),
+        "front",
+    )
+
+    assert trace.instruments == [
+        GcodeInstrument("front-1", "4", "front", 1, 3),
+        GcodeInstrument("front-implicit", "none", "front", 0, 0),
+    ]
+    assert [segment.instrument_id for segment in trace.segments] == [
+        "front-implicit",
+        "front-1",
+    ]
+    assert [segment.tool_id for segment in trace.segments] == ["none", "4"]
+    assert trace.segments[-1].instrument_id == "front-1"
+    assert trace.active_tool_paths == (
+        GcodeToolPath("front:none", "none", "front", 0, 2),
+        GcodeToolPath("front:4", "4", "front", 1, 4),
+    )
 
 
 def test_interpreter_ignores_unsupported_commands_once():

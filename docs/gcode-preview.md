@@ -13,8 +13,9 @@ Supported state:
 - `G20` and `G21` for inch/metric units.
 - `G90` and `G91` for absolute/incremental positioning.
 - `Tn` for active tool tracking.
-- `M6` as a tool-change instruction. Every `M6` creates a separate preview
-  instrument, even when it selects the same `Tn` tool again.
+- `M6` as a tool-change instruction for low-level parsing. Preview colors and the overlay table
+  are collected by active tool id, so repeated `M6` commands for the same `Tn` stay in one tool
+  path group.
 - Modal `G0`/`G1` movement, including coordinate-only continuation lines.
 
 Supported movement:
@@ -25,23 +26,23 @@ Supported movement:
 
 ## Cut and Retract Classification
 
-Each linear segment is classified from the endpoint Z value:
+Each linear segment is classified from both endpoint Z values:
 
-- `Z < 0`: cut segment.
-- `Z >= 0`: retract/travel segment.
+- cut segment: at least one endpoint has `Z < 0`.
+- retract/travel segment: both endpoints have `Z >= 0`.
 
 Cut segments are drawn as solid colored lines above the Gerber preview. Retract/travel
-segments are drawn as dotted low-alpha lines in the same instrument color.
+segments are drawn as dotted low-alpha lines in the same tool color.
 
-## Instrument Colors
+## Tool Colors
 
-The preview colors G-code by instrument instance rather than only by output file or tool number.
-An instrument instance is created for each `M6`; repeated `M6` commands with the same `Tn` still
-get separate colors. Movement before the first `M6` is grouped into an implicit instrument.
+The preview colors G-code by NC file and active tool id. Movement before any tool selection is
+grouped into an initial `none` tool path, so it remains visible instead of being merged or skipped.
 
-The Preview dialog overlays an instrument table on the canvas for the active NC outputs. It shows
-the color, NC source, instrument change number, tool id, cut segment count, and pass/retract
-segment count.
+The Preview dialog overlays a tool table on the canvas for the active NC outputs. It shows the NC
+source, path number, tool id, cut segment count, and pass/retract segment count. The path number
+uses the same color as the rendered tool path. Rows are separated when the table moves to another
+NC file.
 
 ## Output Files
 
