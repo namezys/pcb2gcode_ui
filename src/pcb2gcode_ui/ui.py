@@ -1,3 +1,4 @@
+from functools import partial
 from pathlib import Path
 
 import flet as ft
@@ -93,20 +94,14 @@ class Pcb2GCodeApp:
     def _build_file_row(self, spec: OptionSpec) -> ft.Control:
         field = self._text_field(spec)
 
-        def pick_file(_event, key: str = spec.key):
-            selected_files = self.file_picker.pick_files(
-                dialog_title=f"Select {SPEC_BY_KEY[key].label}",
-                allow_multiple=False,
-            )
-            if selected_files:
-                self._set_value(key, selected_files[0].path)
-                self._set_default_output_dir()
-
         return ft.Row(
             [
                 field,
                 ft.OutlinedButton(
-                    "Browse", icon=ft.Icons.UPLOAD_FILE, on_click=pick_file, width=BUTTON_WIDTH
+                    "Browse",
+                    icon=ft.Icons.UPLOAD_FILE,
+                    on_click=partial(self._pick_input_file, key=spec.key),
+                    width=BUTTON_WIDTH,
                 ),
             ]
         )
@@ -114,19 +109,14 @@ class Pcb2GCodeApp:
     def _build_output_directory_row(self) -> ft.Control:
         field = self._text_field(SPEC_BY_KEY["output-dir"])
 
-        def pick_directory(_event):
-            selected_path = self.directory_picker.get_directory_path(
-                dialog_title="Select NC output directory",
-                initial_directory=self.values.get("output-dir", ""),
-            )
-            if selected_path:
-                self._set_value("output-dir", selected_path)
-
         return ft.Row(
             [
                 field,
                 ft.OutlinedButton(
-                    "Browse", icon=ft.Icons.FOLDER, on_click=pick_directory, width=BUTTON_WIDTH
+                    "Browse",
+                    icon=ft.Icons.FOLDER,
+                    on_click=self._pick_output_directory,
+                    width=BUTTON_WIDTH,
                 ),
             ]
         )
@@ -248,14 +238,40 @@ class Pcb2GCodeApp:
         if not self.values.get("output-dir", "").strip():
             self._set_value("output-dir", str(default_output_directory(self.values)))
 
-    def _open_file(self, _event):
-        selected_files = self.file_picker.pick_files(
+    async def _pick_input_file(self, _event, key: str):
+        selected_files = await self.file_picker.pick_files(
+            dialog_title=f"Select {SPEC_BY_KEY[key].label}",
+            allow_multiple=False,
+        )
+        if not selected_files:
+            return
+        selected_path = selected_files[0].path
+        if not selected_path:
+            self._set_output("Selected file has no local filesystem path.")
+            return
+        self._set_value(key, selected_path)
+        self._set_default_output_dir()
+
+    async def _pick_output_directory(self, _event):
+        selected_path = await self.directory_picker.get_directory_path(
+            dialog_title="Select NC output directory",
+            initial_directory=self.values.get("output-dir", ""),
+        )
+        if selected_path:
+            self._set_value("output-dir", selected_path)
+
+    async def _open_file(self, _event):
+        selected_files = await self.file_picker.pick_files(
             dialog_title="Open millproject",
             allow_multiple=False,
         )
         if not selected_files:
             return
-        path = Path(selected_files[0].path)
+        selected_path = selected_files[0].path
+        if not selected_path:
+            self._set_output("Selected millproject has no local filesystem path.")
+            return
+        path = Path(selected_path)
         self.current_millproject = path
         self.values = parse_millproject(path)
         for key, value in self.values.items():
@@ -263,14 +279,14 @@ class Pcb2GCodeApp:
         self._set_default_output_dir()
         self._set_output(f"Loaded {path}")
 
-    def _save(self, _event):
+    async def _save(self, _event):
         if not self.current_millproject:
-            self._save_as(_event)
+            await self._save_as(_event)
             return
         self._write_millproject(self.current_millproject)
 
-    def _save_as(self, _event):
-        selected_path = self.save_picker.save_file(
+    async def _save_as(self, _event):
+        selected_path = await self.save_picker.save_file(
             dialog_title="Save millproject",
             file_name="millproject",
             initial_directory=str(self.current_millproject.parent)
