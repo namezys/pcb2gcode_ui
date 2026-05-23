@@ -13,12 +13,15 @@ The first screen is the working UI:
 - Toolbar: open, save, save as, validate, and generate.
 - File section: `front`, `back`, `drill`, `outline`, and output directory pickers.
 - Preview button: opens a closable preview window before NC generation.
+- Help button: opens workflow, safety, validation, and preview guidance.
 - Parameter tabs: Generic, CNC, Milling, Drilling, Outline, Optimization, Autolevelling,
   Alignment, and Output.
 - Command output panel for validation and generation logs.
 
-Each parameter control includes tooltip help based on the official `pcb2gcode --help` text and
-the bundled `pcb2gcode` source metadata.
+Each parameter control keeps a short tooltip and has a compact `?` button. The button opens a
+scrollable Markdown help dialog with option type/default notes, G-code effect, practical usage
+notes, and source references extracted from `docs/detail help.md`. Help content lives in a
+separate Python data module so the UI layout code stays focused on controls.
 
 ## Millproject Files
 

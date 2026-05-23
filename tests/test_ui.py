@@ -4,7 +4,9 @@ from pathlib import Path
 
 import flet as ft
 
+from pcb2gcode_ui.help_content import OPTION_HELP_BY_KEY
 from pcb2gcode_ui.millproject import parse_millproject
+from pcb2gcode_ui.options import SPEC_BY_KEY
 from pcb2gcode_ui.preview import PreviewResult, PreviewSide
 from pcb2gcode_ui.ui import Pcb2GCodeApp
 
@@ -196,6 +198,37 @@ def test_close_preview_pops_dialog():
     app._close_preview(None)
 
     assert page.dialogs == []
+
+
+def test_general_help_opens_workflow_dialog():
+    page = FakePage()
+    app = Pcb2GCodeApp(page)
+
+    app._open_general_help(None)
+
+    assert page.dialogs
+    assert page.dialogs[0].title.value == "PCB2GCode UI Help"
+    assert "Generate NC" in page.dialogs[0].content.controls[0].value
+
+
+def test_option_help_opens_matching_option_dialog():
+    page = FakePage()
+    app = Pcb2GCodeApp(page)
+
+    app._open_option_help(None, "mill-diameters")
+
+    assert page.dialogs
+    assert page.dialogs[0].title.value == OPTION_HELP_BY_KEY["mill-diameters"].title
+    assert "unsafe" in page.dialogs[0].content.controls[0].value
+
+
+def test_file_row_includes_help_button_without_breaking_browse_button():
+    app = _app()
+
+    row = app._build_file_row(SPEC_BY_KEY["front"])
+
+    assert any(isinstance(control, ft.IconButton) for control in row.controls)
+    assert any(isinstance(control, ft.OutlinedButton) for control in row.controls)
 
 
 def test_pick_aux_layer_is_preview_only_and_single_file(tmp_path: Path):

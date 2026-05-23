@@ -4,6 +4,7 @@ from pathlib import Path
 
 import flet as ft
 
+from pcb2gcode_ui.help_content import GENERAL_HELP, OPTION_HELP_BY_KEY, option_help_markdown
 from pcb2gcode_ui.millproject import parse_millproject, write_millproject
 from pcb2gcode_ui.options import (
     FILE_OPTIONS,
@@ -41,6 +42,10 @@ PREVIEW_DIALOG_HEIGHT = 680
 PREVIEW_IMAGE_WIDTH = 920
 PREVIEW_IMAGE_HEIGHT = 520
 PREVIEW_ALPHA_SLIDER_WIDTH = 170
+HELP_DIALOG_WIDTH = 760
+HELP_DIALOG_HEIGHT = 520
+HELP_ICON_SIZE = 16
+HELP_BUTTON_SIZE = 32
 BODY_TEXT_SIZE = 12
 SECTION_TITLE_SIZE = 15
 LABEL_TEXT_SIZE = 12
@@ -125,6 +130,7 @@ class Pcb2GCodeApp:
             height=PREVIEW_IMAGE_HEIGHT,
         )
         self.preview_dialog: ft.AlertDialog = None
+        self.help_dialog: ft.AlertDialog = None
         self.status_text = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
         self.group_container = ft.Column(spacing=8)
         self.group_controls: dict[str, ft.Control] = {}
@@ -193,6 +199,12 @@ class Pcb2GCodeApp:
                     "Preview",
                     icon=ft.Icons.IMAGE_SEARCH,
                     on_click=self._open_preview,
+                    style=_button_style(),
+                ),
+                ft.OutlinedButton(
+                    "Help",
+                    icon=ft.Icons.HELP_OUTLINE,
+                    on_click=self._open_general_help,
                     style=_button_style(),
                 ),
                 ft.FilledButton("Generate NC", icon=ft.Icons.PLAY_ARROW, on_click=self._generate),
@@ -311,6 +323,7 @@ class Pcb2GCodeApp:
         return ft.Row(
             [
                 field,
+                self._help_button(spec),
                 ft.OutlinedButton(
                     "Browse",
                     icon=ft.Icons.UPLOAD_FILE,
@@ -327,6 +340,7 @@ class Pcb2GCodeApp:
         return ft.Row(
             [
                 field,
+                self._help_button(SPEC_BY_KEY["output-dir"]),
                 ft.OutlinedButton(
                     "Browse",
                     icon=ft.Icons.FOLDER,
@@ -409,7 +423,8 @@ class Pcb2GCodeApp:
 
     def _build_option_row(self, spec: OptionSpec) -> ft.Control:
         return ft.Row(
-            [self._control_for_spec(spec)], vertical_alignment=ft.CrossAxisAlignment.START
+            [self._control_for_spec(spec), self._help_button(spec)],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     def _control_for_spec(self, spec: OptionSpec) -> ft.Control:
@@ -458,6 +473,59 @@ class Pcb2GCodeApp:
         )
         self.controls[spec.key] = dropdown
         return dropdown
+
+    def _help_button(self, spec: OptionSpec) -> ft.IconButton:
+        return ft.IconButton(
+            icon=ft.Icons.QUESTION_MARK,
+            icon_color=FOCUSED_OUTLINE_COLOR,
+            icon_size=HELP_ICON_SIZE,
+            width=HELP_BUTTON_SIZE,
+            height=HELP_BUTTON_SIZE,
+            tooltip=f"Help for {spec.label}",
+            on_click=partial(self._open_option_help, key=spec.key),
+        )
+
+    def _open_general_help(self, _event):
+        self._show_help_dialog(GENERAL_HELP.title, GENERAL_HELP.markdown)
+
+    def _open_option_help(self, _event, key: str):
+        help_entry = OPTION_HELP_BY_KEY[key]
+        self._show_help_dialog(help_entry.title, option_help_markdown(help_entry))
+
+    def _show_help_dialog(self, title: str, markdown: str):
+        self.help_dialog = ft.AlertDialog(
+            modal=False,
+            title=ft.Text(title, color=TEXT_COLOR, size=SECTION_TITLE_SIZE),
+            content=ft.Column(
+                [
+                    ft.Markdown(
+                        markdown,
+                        selectable=True,
+                        extension_set=ft.MarkdownExtensionSet.GITHUB_FLAVORED,
+                        auto_follow_links=True,
+                    )
+                ],
+                width=HELP_DIALOG_WIDTH,
+                height=HELP_DIALOG_HEIGHT,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            bgcolor=SURFACE_COLOR,
+            actions=[
+                ft.OutlinedButton(
+                    "Close",
+                    icon=ft.Icons.CLOSE,
+                    on_click=self._close_help,
+                    style=_button_style(),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(self.help_dialog)
+        self.page.update()
+
+    def _close_help(self, _event):
+        self.page.pop_dialog()
+        self.page.update()
 
     def _set_value(self, key: str, value: str, update_control: bool = True):
         self.values[key] = value
