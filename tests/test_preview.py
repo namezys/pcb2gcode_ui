@@ -1,0 +1,202 @@
+from io import BytesIO
+from pathlib import Path
+
+from PIL import Image
+
+from pcb2gcode_ui.preview import (
+    Bounds,
+    GerberPreviewRenderer,
+    PreviewLayerKind,
+    PreviewOptions,
+    RenderedLayer,
+    TransformSettings,
+    _apply_alpha,
+    _compose_preview,
+    _layer_color,
+    _parse_drill_file,
+    _tint_layer_image,
+    _transform_point,
+)
+
+
+def test_render_preview_uses_pygerber_api_for_example_board():
+    values = {
+        "front": "pcb2gcode/extras/example_board/example_board-F.Cu.gbr",
+        "outline": "pcb2gcode/extras/example_board/example_board-Edge.Cuts.gbr",
+        "metric": "true",
+        "zero-start": "true",
+        "x-offset": "1",
+        "y-offset": "2",
+        "tile-x": "2",
+        "tile-y": "1",
+    }
+
+    result = GerberPreviewRenderer().render(
+        values,
+        Path.cwd(),
+        PreviewOptions(show_drill=False, dpmm=3),
+    )
+
+    assert result.ok
+    assert result.layer_count == 2
+    image = Image.open(BytesIO(result.png))
+    assert image.width > image.height
+
+
+def test_render_preview_can_show_front_and_back():
+    values = {
+        "front": "pcb2gcode/extras/example_board/example_board-F.Cu.gbr",
+        "back": "pcb2gcode/extras/example_board/example_board-B.Cu.gbr",
+        "metric": "true",
+    }
+
+    result = GerberPreviewRenderer().render(
+        values,
+        Path.cwd(),
+        PreviewOptions(show_front=True, show_back=True, show_drill=False, show_cutoff=False),
+    )
+
+    assert result.ok
+    assert result.layer_count == 2
+    assert _layer_color(PreviewLayerKind.FRONT) != _layer_color(PreviewLayerKind.BACK)
+
+
+def test_compose_preview_places_layers_in_shared_coordinate_system():
+    front_color = _layer_color(PreviewLayerKind.FRONT)
+    back_color = _layer_color(PreviewLayerKind.BACK)
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (10, 10), (*front_color, 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 10, 10),
+    )
+    back_layer = RenderedLayer(
+        image=Image.new("RGBA", (10, 10), (*back_color, 255)),
+        kind=PreviewLayerKind.BACK,
+        bounds=Bounds(20, 0, 30, 10),
+    )
+    settings = TransformSettings(
+        metric=True,
+        zero_start=False,
+        x_offset_mm=0,
+        y_offset_mm=0,
+        tile_x=1,
+        tile_y=1,
+        board_bounds=Bounds(0, 0, 30, 10),
+    )
+
+    image = _compose_preview(
+        [front_layer, back_layer],
+        None,
+        Bounds(0, 0, 30, 10),
+        settings,
+        PreviewOptions(show_drill=False, show_cutoff=False, dpmm=1, layer_alpha=100),
+    )
+
+    assert image.getpixel((5, 5))[:3] == front_color
+    assert image.getpixel((25, 5))[:3] == back_color
+
+
+def test_compose_preview_does_not_mirror_back_layer():
+    back_color = _layer_color(PreviewLayerKind.BACK)
+    layer_image = Image.new("RGBA", (2, 1), (0, 0, 0, 0))
+    layer_image.putpixel((0, 0), (*back_color, 255))
+    back_layer = RenderedLayer(
+        image=layer_image,
+        kind=PreviewLayerKind.BACK,
+        bounds=Bounds(0, 0, 2, 1),
+    )
+    settings = TransformSettings(
+        metric=True,
+        zero_start=False,
+        x_offset_mm=0,
+        y_offset_mm=0,
+        tile_x=1,
+        tile_y=1,
+        board_bounds=Bounds(0, 0, 2, 1),
+    )
+
+    image = _compose_preview(
+        [back_layer],
+        None,
+        Bounds(0, 0, 2, 1),
+        settings,
+        PreviewOptions(show_drill=False, show_cutoff=False, dpmm=1, layer_alpha=100),
+    )
+
+    assert image.getpixel((0, 0))[:3] == back_color
+
+
+def test_render_preview_can_show_single_aux_layer():
+    values = {"metric": "true"}
+
+    result = GerberPreviewRenderer().render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            show_front=False,
+            show_back=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_aux=True,
+            aux_layer=Path("pcb2gcode/extras/example_board/example_board-F.Cu.gbr"),
+            dpmm=3,
+        ),
+    )
+
+    assert result.ok
+    assert result.layer_count == 1
+
+
+def test_apply_alpha_changes_layer_alpha_channel():
+    image = Image.new("RGBA", (1, 1), (10, 20, 30, 200))
+
+    result = _apply_alpha(image, 50)
+
+    assert result.getpixel((0, 0)) == (10, 20, 30, 100)
+
+
+def test_tint_layer_image_preserves_alpha_and_changes_color():
+    image = Image.new("RGBA", (1, 1), (255, 255, 255, 180))
+
+    result = _tint_layer_image(image, (1, 2, 3))
+
+    assert result.getpixel((0, 0)) == (1, 2, 3, 180)
+
+
+def test_parse_drill_file_reads_decimal_metric_hits(tmp_path: Path):
+    drill_path = tmp_path / "board.drl"
+    drill_path.write_text(
+        "\n".join(
+            [
+                "M48",
+                "METRIC",
+                "T01C0.8",
+                "%",
+                "T01",
+                "X1.5Y2.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    layer = _parse_drill_file(drill_path)
+
+    assert not layer.warnings
+    assert len(layer.hits) == 1
+    assert layer.hits[0].x_mm == 1.5
+    assert layer.hits[0].y_mm == 2.5
+    assert layer.hits[0].diameter_mm == 0.8
+
+
+def test_transform_point_applies_zero_start_offsets():
+    settings = TransformSettings(
+        metric=True,
+        zero_start=True,
+        x_offset_mm=1,
+        y_offset_mm=2,
+        tile_x=1,
+        tile_y=1,
+        board_bounds=Bounds(5, 10, 25, 30),
+    )
+
+    assert _transform_point(6, 12, settings) == (2, 4)

@@ -1,3 +1,4 @@
+import base64
 from functools import partial
 from pathlib import Path
 
@@ -13,6 +14,13 @@ from pcb2gcode_ui.options import (
     default_output_directory,
     default_values,
 )
+from pcb2gcode_ui.preview import (
+    DEFAULT_LAYER_ALPHA,
+    GerberPreviewRenderer,
+    PreviewOptions,
+    PreviewResult,
+    PreviewSide,
+)
 from pcb2gcode_ui.runner import (
     CommandResult,
     discover_binary,
@@ -24,6 +32,30 @@ from pcb2gcode_ui.validation import ValidationMessage, validate_values
 
 FIELD_WIDTH = 520
 BUTTON_WIDTH = 140
+WINDOW_WIDTH = 1000
+WINDOW_HEIGHT = 720
+WINDOW_MIN_WIDTH = 700
+WINDOW_MIN_HEIGHT = 300
+PREVIEW_DIALOG_WIDTH = 960
+PREVIEW_DIALOG_HEIGHT = 680
+PREVIEW_IMAGE_WIDTH = 920
+PREVIEW_IMAGE_HEIGHT = 520
+PREVIEW_ALPHA_SLIDER_WIDTH = 170
+BODY_TEXT_SIZE = 12
+SECTION_TITLE_SIZE = 15
+LABEL_TEXT_SIZE = 12
+PAGE_BACKGROUND_COLOR = ft.Colors.GREY_900
+SURFACE_COLOR = ft.Colors.GREY_800
+FIELD_BACKGROUND_COLOR = ft.Colors.GREY_900
+TEXT_COLOR = ft.Colors.GREY_100
+MUTED_TEXT_COLOR = ft.Colors.GREY_300
+OUTLINE_COLOR = ft.Colors.BLUE_GREY_300
+FOCUSED_OUTLINE_COLOR = ft.Colors.LIGHT_BLUE_300
+APP_SUMMARY = (
+    "PCB2GCode UI is a lightweight editor for pcb2gcode millproject files. "
+    "Use it to pick Gerber/drill inputs, tune common parameters, validate the command, "
+    "and generate NC files without manually editing long option lists."
+)
 
 
 class Pcb2GCodeApp:
@@ -33,9 +65,67 @@ class Pcb2GCodeApp:
         self.controls: dict[str, ft.Control] = {}
         self.current_millproject: Path = None
         self.file_picker = ft.FilePicker()
+        self.other_layer_picker = ft.FilePicker()
         self.directory_picker = ft.FilePicker()
         self.save_picker = ft.FilePicker()
-        self.status_text = ft.Text()
+        self.preview_renderer = GerberPreviewRenderer()
+        self.preview_aux_layer: Path = None
+        self.preview_side = PreviewSide.FRONT
+        self.preview_front = ft.Checkbox(
+            label="Front",
+            value=True,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+        self.preview_back = ft.Checkbox(
+            label="Back",
+            value=False,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+        self.preview_drill = ft.Checkbox(
+            label="Drill",
+            value=True,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+        self.preview_cutoff = ft.Checkbox(
+            label="Cutoff",
+            value=True,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+        self.preview_other = ft.Checkbox(
+            label="Aux",
+            value=True,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+            on_change=self._update_preview_options,
+        )
+        self.preview_alpha = ft.Slider(
+            value=DEFAULT_LAYER_ALPHA,
+            min=10,
+            max=100,
+            divisions=9,
+            label="{value}%",
+            width=PREVIEW_ALPHA_SLIDER_WIDTH,
+            active_color=FOCUSED_OUTLINE_COLOR,
+            inactive_color=OUTLINE_COLOR,
+            thumb_color=FOCUSED_OUTLINE_COLOR,
+            on_change_end=self._update_preview_options,
+        )
+        self.preview_status = ft.Text(
+            "Preview is not rendered yet.",
+            color=MUTED_TEXT_COLOR,
+            size=BODY_TEXT_SIZE,
+        )
+        self.preview_image = ft.Image(
+            b"",
+            fit=ft.BoxFit.CONTAIN,
+            width=PREVIEW_IMAGE_WIDTH,
+            height=PREVIEW_IMAGE_HEIGHT,
+        )
+        self.preview_dialog: ft.AlertDialog = None
+        self.status_text = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
         self.group_container = ft.Column(spacing=8)
         self.group_controls: dict[str, ft.Control] = {}
         self.command_output = ft.TextField(
@@ -45,17 +135,36 @@ class Pcb2GCodeApp:
             max_lines=12,
             read_only=True,
             expand=True,
+            **_text_field_style(),
         )
 
     def build(self):
         self.page.title = "PCB2GCode UI"
         self.page.scroll = ft.ScrollMode.AUTO
-        self.page.services.extend([self.file_picker, self.directory_picker, self.save_picker])
+        self.page.bgcolor = PAGE_BACKGROUND_COLOR
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self._configure_window()
+        self.page.theme = ft.Theme(
+            text_theme=ft.TextTheme(
+                body_large=ft.TextStyle(size=BODY_TEXT_SIZE, color=TEXT_COLOR),
+                body_medium=ft.TextStyle(size=BODY_TEXT_SIZE, color=TEXT_COLOR),
+                body_small=ft.TextStyle(size=BODY_TEXT_SIZE, color=TEXT_COLOR),
+                label_large=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+                label_medium=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+                label_small=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
+                title_medium=ft.TextStyle(size=SECTION_TITLE_SIZE, color=TEXT_COLOR),
+            ),
+            visual_density=ft.VisualDensity.COMPACT,
+        )
+        self.page.services.extend(
+            [self.file_picker, self.other_layer_picker, self.directory_picker, self.save_picker]
+        )
         self._refresh_binary_status()
         self.page.add(
             ft.Column(
                 [
                     self._build_toolbar(),
+                    self._build_summary(),
                     self.status_text,
                     self._build_file_section(),
                     self._build_parameter_sections(),
@@ -71,12 +180,106 @@ class Pcb2GCodeApp:
                 ft.FilledButton(
                     "Open Millproject", icon=ft.Icons.FOLDER_OPEN, on_click=self._open_file
                 ),
-                ft.OutlinedButton("Save", icon=ft.Icons.SAVE, on_click=self._save),
-                ft.OutlinedButton("Save As", icon=ft.Icons.SAVE_AS, on_click=self._save_as),
-                ft.OutlinedButton("Validate", icon=ft.Icons.CHECK, on_click=self._validate),
+                ft.OutlinedButton(
+                    "Save", icon=ft.Icons.SAVE, on_click=self._save, style=_button_style()
+                ),
+                ft.OutlinedButton(
+                    "Save As", icon=ft.Icons.SAVE_AS, on_click=self._save_as, style=_button_style()
+                ),
+                ft.OutlinedButton(
+                    "Validate", icon=ft.Icons.CHECK, on_click=self._validate, style=_button_style()
+                ),
+                ft.OutlinedButton(
+                    "Preview",
+                    icon=ft.Icons.IMAGE_SEARCH,
+                    on_click=self._open_preview,
+                    style=_button_style(),
+                ),
                 ft.FilledButton("Generate NC", icon=ft.Icons.PLAY_ARROW, on_click=self._generate),
             ],
             wrap=True,
+        )
+
+    def _build_summary(self) -> ft.Control:
+        return ft.Container(
+            content=ft.Text(
+                APP_SUMMARY,
+                color=MUTED_TEXT_COLOR,
+                size=BODY_TEXT_SIZE,
+            ),
+            padding=10,
+            border=_border_all(),
+            border_radius=6,
+            bgcolor=SURFACE_COLOR,
+        )
+
+    def _build_preview_content(self) -> ft.Control:
+        return ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.SegmentedButton(
+                            segments=[
+                                ft.Segment(value=PreviewSide.FRONT, label=_tab_label("Front")),
+                                ft.Segment(value=PreviewSide.BACK, label=_tab_label("Back")),
+                            ],
+                            selected=[self.preview_side],
+                            on_change=self._select_preview_side,
+                        ),
+                        ft.Text("Transparency", color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE),
+                        self.preview_alpha,
+                        ft.OutlinedButton(
+                            "Load Aux",
+                            icon=ft.Icons.LAYERS,
+                            on_click=self._pick_aux_layer,
+                            style=_button_style(),
+                        ),
+                        ft.FilledButton(
+                            "Regenerate",
+                            icon=ft.Icons.REFRESH,
+                            on_click=self._refresh_preview,
+                        ),
+                    ],
+                    wrap=True,
+                ),
+                ft.Row(
+                    [
+                        self.preview_front,
+                        self.preview_back,
+                        self.preview_drill,
+                        self.preview_cutoff,
+                        self.preview_other,
+                    ],
+                    wrap=True,
+                ),
+                self.preview_status,
+                ft.Container(
+                    content=self.preview_image,
+                    padding=8,
+                    border=_border_all(),
+                    border_radius=4,
+                    bgcolor=PAGE_BACKGROUND_COLOR,
+                ),
+            ],
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
+            width=PREVIEW_DIALOG_WIDTH,
+            height=PREVIEW_DIALOG_HEIGHT,
+        )
+
+    def _build_preview_dialog(self) -> ft.AlertDialog:
+        return ft.AlertDialog(
+            modal=False,
+            title=ft.Text("Preview", color=TEXT_COLOR, size=SECTION_TITLE_SIZE),
+            content=ft.Column(
+                [self._build_preview_content()],
+                tight=True,
+            ),
+            bgcolor=SURFACE_COLOR,
+            actions=[
+                ft.OutlinedButton("Close", icon=ft.Icons.CLOSE, on_click=self._close_preview),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
         )
 
     def _build_file_section(self) -> ft.Control:
@@ -85,10 +288,21 @@ class Pcb2GCodeApp:
         ]
         rows.append(self._build_output_directory_row())
         return ft.Container(
-            content=ft.Column([ft.Text("Files", size=18, weight=ft.FontWeight.BOLD), *rows]),
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "Files",
+                        color=TEXT_COLOR,
+                        size=SECTION_TITLE_SIZE,
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    *rows,
+                ]
+            ),
             padding=10,
             border=_border_all(),
             border_radius=6,
+            bgcolor=SURFACE_COLOR,
         )
 
     def _build_file_row(self, spec: OptionSpec) -> ft.Control:
@@ -102,6 +316,7 @@ class Pcb2GCodeApp:
                     icon=ft.Icons.UPLOAD_FILE,
                     on_click=partial(self._pick_input_file, key=spec.key),
                     width=BUTTON_WIDTH,
+                    style=_button_style(),
                 ),
             ]
         )
@@ -117,6 +332,7 @@ class Pcb2GCodeApp:
                     icon=ft.Icons.FOLDER,
                     on_click=self._pick_output_directory,
                     width=BUTTON_WIDTH,
+                    style=_button_style(),
                 ),
             ]
         )
@@ -137,7 +353,8 @@ class Pcb2GCodeApp:
             [
                 ft.SegmentedButton(
                     segments=[
-                        ft.Segment(value=group, label=ft.Text(group)) for group in tab_groups
+                        ft.Segment(value=group, label=_tab_label(group))
+                        for group in tab_groups
                     ],
                     selected=[tab_groups[0]],
                     on_change=self._select_parameter_group,
@@ -155,6 +372,16 @@ class Pcb2GCodeApp:
         self.group_container.controls = [self.group_controls[group]]
         self.page.update()
 
+    def _update_preview_options(self, event):
+        self._refresh_preview(event)
+
+    def _select_preview_side(self, event):
+        selected = list(event.control.selected)
+        if not selected:
+            return
+        self.preview_side = PreviewSide(selected[0])
+        self._refresh_preview(event)
+
     def _build_group(self, group: str) -> ft.Control:
         rows = [
             self._build_option_row(spec)
@@ -164,7 +391,12 @@ class Pcb2GCodeApp:
         return ft.Container(
             content=ft.Column(
                 [
-                    ft.Text(group, size=18, weight=ft.FontWeight.BOLD),
+                    ft.Text(
+                        group,
+                        color=TEXT_COLOR,
+                        size=SECTION_TITLE_SIZE,
+                        weight=ft.FontWeight.BOLD,
+                    ),
                     *rows,
                 ],
                 spacing=8,
@@ -172,6 +404,7 @@ class Pcb2GCodeApp:
             padding=10,
             border=_border_all(),
             border_radius=6,
+            bgcolor=SURFACE_COLOR,
         )
 
     def _build_option_row(self, spec: OptionSpec) -> ft.Control:
@@ -193,6 +426,7 @@ class Pcb2GCodeApp:
             tooltip=spec.help_text,
             width=FIELD_WIDTH,
             on_change=lambda event, key=spec.key: self._set_value(key, event.control.value, False),
+            **_text_field_style(),
         )
         self.controls[spec.key] = field
         return field
@@ -202,6 +436,7 @@ class Pcb2GCodeApp:
             label=spec.label,
             value=bool_value(self.values.get(spec.key, "false")),
             tooltip=spec.help_text,
+            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=lambda event, key=spec.key: self._set_value(
                 key,
                 "true" if event.control.value else "false",
@@ -219,6 +454,7 @@ class Pcb2GCodeApp:
             tooltip=spec.help_text,
             width=FIELD_WIDTH,
             on_select=lambda event, key=spec.key: self._set_value(key, event.control.value, False),
+            **_dropdown_style(),
         )
         self.controls[spec.key] = dropdown
         return dropdown
@@ -259,6 +495,31 @@ class Pcb2GCodeApp:
         )
         if selected_path:
             self._set_value("output-dir", selected_path)
+
+    async def _pick_aux_layer(self, _event):
+        selected_files = await self.other_layer_picker.pick_files(
+            dialog_title="Select preview-only aux Gerber",
+            allow_multiple=False,
+        )
+        if not selected_files:
+            return
+        selected_path = selected_files[0].path
+        if not selected_path:
+            self.preview_status.value = "Selected aux Gerber has no local filesystem path."
+            self.page.update()
+            return
+        self.preview_aux_layer = Path(selected_path)
+        self._refresh_preview(_event)
+
+    def _open_preview(self, event):
+        if not self.preview_dialog:
+            self.preview_dialog = self._build_preview_dialog()
+        self.page.show_dialog(self.preview_dialog)
+        self._refresh_preview(event)
+
+    def _close_preview(self, _event):
+        self.page.pop_dialog()
+        self.page.update()
 
     async def _open_file(self, _event):
         selected_files = await self.file_picker.pick_files(
@@ -323,6 +584,35 @@ class Pcb2GCodeApp:
         generation_result = generate_nc_files(self.values, base_dir=self._base_dir())
         self._set_command_result(generation_result)
 
+    def _refresh_preview(self, _event):
+        result = self.preview_renderer.render(
+            self.values,
+            self._base_dir(),
+            PreviewOptions(
+                side=self.preview_side,
+                show_front=bool(self.preview_front.value),
+                show_back=bool(self.preview_back.value),
+                show_drill=bool(self.preview_drill.value),
+                show_cutoff=bool(self.preview_cutoff.value),
+                show_aux=bool(self.preview_other.value),
+                aux_layer=self.preview_aux_layer,
+                layer_alpha=round(self.preview_alpha.value),
+            ),
+        )
+        self._set_preview_result(result)
+
+    def _set_preview_result(self, result: PreviewResult):
+        if result.ok:
+            self.preview_image.src = _png_data_uri(result.png)
+            summary = f"Preview rendered with {result.layer_count} layer(s)."
+        else:
+            self.preview_image.src = b""
+            summary = "Preview was not rendered."
+        if result.warnings:
+            summary = "\n".join([summary, *result.warnings])
+        self.preview_status.value = summary
+        self.page.update()
+
     def _show_validation_messages(self, messages: list[ValidationMessage]):
         for control in self.controls.values():
             if isinstance(control, ft.TextField):
@@ -367,11 +657,71 @@ class Pcb2GCodeApp:
             return self.current_millproject.parent
         return Path.cwd()
 
+    def _configure_window(self):
+        window = getattr(self.page, "window", None)
+        if not window:
+            return
+        window.width = WINDOW_WIDTH
+        window.height = WINDOW_HEIGHT
+        window.min_width = WINDOW_MIN_WIDTH
+        window.min_height = WINDOW_MIN_HEIGHT
+
 
 def run_app():
     ft.app(target=lambda page: Pcb2GCodeApp(page).build())
 
 
 def _border_all() -> ft.Border:
-    side = ft.BorderSide(width=1, color=ft.Colors.OUTLINE_VARIANT)
+    side = ft.BorderSide(width=1, color=OUTLINE_COLOR)
     return ft.Border(left=side, top=side, right=side, bottom=side)
+
+
+def _tab_label(text: str) -> ft.Text:
+    return ft.Text(
+        text,
+        color=TEXT_COLOR,
+        size=BODY_TEXT_SIZE,
+        no_wrap=True,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+
+def _png_data_uri(png: bytes) -> str:
+    encoded = base64.b64encode(png).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _base_field_style() -> dict[str, object]:
+    return {
+        "border": ft.InputBorder.OUTLINE,
+        "border_color": OUTLINE_COLOR,
+        "focused_border_color": FOCUSED_OUTLINE_COLOR,
+        "border_width": 1,
+        "focused_border_width": 2,
+        "border_radius": 4,
+        "color": TEXT_COLOR,
+        "fill_color": FIELD_BACKGROUND_COLOR,
+        "filled": True,
+        "label_style": ft.TextStyle(size=LABEL_TEXT_SIZE, color=MUTED_TEXT_COLOR),
+        "text_size": BODY_TEXT_SIZE,
+    }
+
+
+def _text_field_style() -> dict[str, object]:
+    return {
+        **_base_field_style(),
+        "cursor_color": FOCUSED_OUTLINE_COLOR,
+    }
+
+
+def _dropdown_style() -> dict[str, object]:
+    return _base_field_style()
+
+
+def _button_style() -> ft.ButtonStyle:
+    return ft.ButtonStyle(
+        color=TEXT_COLOR,
+        icon_color=TEXT_COLOR,
+        side=ft.BorderSide(width=1, color=OUTLINE_COLOR),
+    )

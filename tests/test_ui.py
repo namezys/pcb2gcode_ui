@@ -5,6 +5,7 @@ from pathlib import Path
 import flet as ft
 
 from pcb2gcode_ui.millproject import parse_millproject
+from pcb2gcode_ui.preview import PreviewResult, PreviewSide
 from pcb2gcode_ui.ui import Pcb2GCodeApp
 
 
@@ -14,6 +15,7 @@ class FakePage:
     scroll: object = None
     services: list[object] = field(default_factory=list)
     controls: list[object] = field(default_factory=list)
+    dialogs: list[object] = field(default_factory=list)
 
     def add(self, *controls):
         self.controls.extend(controls)
@@ -21,10 +23,28 @@ class FakePage:
     def update(self):
         pass
 
+    def show_dialog(self, dialog):
+        self.dialogs.append(dialog)
+
+    def pop_dialog(self):
+        if self.dialogs:
+            return self.dialogs.pop()
+        return None
+
 
 @dataclass
 class FakeFile:
     path: str
+
+
+@dataclass
+class FakeEvent:
+    control: object
+
+
+@dataclass
+class FakeSegmentedControl:
+    selected: list[PreviewSide]
 
 
 class FakeFilePicker:
@@ -49,6 +69,25 @@ class FakeSavePicker:
 
     async def save_file(self, **_kwargs) -> str:
         return self.selected_path
+
+
+class FakePreviewRenderer:
+    def __init__(self):
+        self.base_dir: Path = None
+        self.aux_layer: Path = None
+        self.show_front = False
+        self.show_back = False
+        self.layer_alpha = 0
+        self.side = PreviewSide.FRONT
+
+    def render(self, _values, base_dir: Path, options) -> PreviewResult:
+        self.base_dir = base_dir
+        self.aux_layer = options.aux_layer
+        self.show_front = options.show_front
+        self.show_back = options.show_back
+        self.layer_alpha = options.layer_alpha
+        self.side = options.side
+        return PreviewResult(b"png", ["preview warning"], 2)
 
 
 def test_app_build_constructs_initial_controls():
@@ -108,6 +147,67 @@ def test_save_as_awaits_picker_and_writes_millproject(tmp_path: Path):
 
     assert app.current_millproject == millproject_path
     assert parse_millproject(millproject_path)["metric"] == "true"
+
+
+def test_refresh_preview_sets_image_data_uri():
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+    app.preview_back.value = True
+    app.preview_alpha.value = 70
+
+    app._refresh_preview(None)
+
+    assert app.preview_image.src.startswith("data:image/png;base64,")
+    assert "2 layer" in app.preview_status.value
+    assert "preview warning" in app.preview_status.value
+    assert app.preview_renderer.show_front is True
+    assert app.preview_renderer.show_back is True
+    assert app.preview_renderer.layer_alpha == 70
+
+
+def test_preview_side_selector_updates_preview_side():
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+
+    app._select_preview_side(FakeEvent(FakeSegmentedControl([PreviewSide.BACK])))
+
+    assert app.preview_side == PreviewSide.BACK
+    assert app.preview_renderer.side == PreviewSide.BACK
+
+
+def test_open_preview_shows_dialog_and_refreshes():
+    page = FakePage()
+    app = Pcb2GCodeApp(page)
+    app.preview_renderer = FakePreviewRenderer()
+
+    app._open_preview(None)
+
+    assert page.dialogs
+    assert app.preview_dialog is page.dialogs[0]
+    assert app.preview_image.src.startswith("data:image/png;base64,")
+
+
+def test_close_preview_pops_dialog():
+    page = FakePage()
+    app = Pcb2GCodeApp(page)
+    app.preview_renderer = FakePreviewRenderer()
+    app._open_preview(None)
+
+    app._close_preview(None)
+
+    assert page.dialogs == []
+
+
+def test_pick_aux_layer_is_preview_only_and_single_file(tmp_path: Path):
+    aux_path = tmp_path / "board-F.SilkS.gbr"
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+    app.other_layer_picker = FakeFilePicker([FakeFile(str(aux_path))])
+
+    asyncio.run(app._pick_aux_layer(None))
+
+    assert app.preview_aux_layer == aux_path
+    assert app.preview_renderer.aux_layer == aux_path
 
 
 def _app() -> Pcb2GCodeApp:

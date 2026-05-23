@@ -4,6 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
     "flet",
+    "pillow>=8",
+    "pygerber>=2.4.3,<3",
 ]
 
 [project.optional-dependencies]
@@ -32,3 +34,6 @@ select = ["E", "F", "I"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore::pyparsing.exceptions.PyparsingDeprecationWarning",
+]

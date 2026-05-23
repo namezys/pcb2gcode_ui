@@ -12,6 +12,7 @@ The first screen is the working UI:
 
 - Toolbar: open, save, save as, validate, and generate.
 - File section: `front`, `back`, `drill`, `outline`, and output directory pickers.
+- Preview button: opens a closable preview window before NC generation.
 - Parameter tabs: Generic, CNC, Milling, Drilling, Outline, Optimization, Autolevelling,
   Alignment, and Output.
 - Command output panel for validation and generation logs.
@@ -28,6 +29,27 @@ clean canonical file grouped by UI section.
 Absolute input and output paths are written relative to the saved `millproject` directory when
 they are inside that directory. Command execution resolves relative paths against the loaded
 `millproject` directory so validation can run safely from a temporary working directory.
+
+## Preview
+
+The Preview toolbar button opens a closable dialog and forces a refresh. The preview uses
+PyGerber's Python API (`pygerber.gerberx3.api.v2`) to parse and rasterize Gerber layers in
+memory at high density. The app composes the PNG with Pillow and shows it directly in Flet,
+without invoking the PyGerber CLI or writing preview files.
+
+The preview window uses two compact control rows. The first row has the front/back view selector,
+transparency slider, Load Aux button, and Regenerate button. The second row has horizontal
+visibility toggles for front, back, drill, cutoff/outline, and Aux. Aux is one preview-only
+Gerber file and is not saved to `millproject`.
+
+All enabled layers are composed into one shared board coordinate system. Front copper is tinted
+green/cyan, back copper amber/orange, cutoff light gray, Aux blue, and drill hits light blue.
+Preview layers are not mirrored; mirror-related options are left to `pcb2gcode` generation.
+
+Preview transforms follow the pcb2gcode options that affect placement: `metric`, `x-offset`,
+`y-offset`, `zero-start`, `tile-x`, and `tile-y`. Drill rendering uses a narrow preview-only Excellon reader for common decimal
+`METRIC`/`INCH` files with `TnnCdiameter` tools and `X...Y...` hits. Unsupported drill syntax is
+reported as a preview warning and does not affect validation or NC generation.
 
 ## Validation
 
