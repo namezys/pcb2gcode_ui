@@ -227,7 +227,6 @@ class Pcb2GCodeApp:
         selected_files = self.file_picker.pick_files(
             dialog_title="Open millproject",
             allow_multiple=False,
-            allowed_extensions=["millproject", "txt"],
         )
         if not selected_files:
             return
