@@ -267,7 +267,7 @@ class Pcb2GCodeApp:
         if messages:
             self._set_output("\n".join(message.text for message in messages))
             return
-        result = validate_with_binary(self.values)
+        result = validate_with_binary(self.values, base_dir=self._base_dir())
         self._set_command_result(result)
 
     def _generate(self, _event):
@@ -276,11 +276,11 @@ class Pcb2GCodeApp:
         if messages:
             self._set_output("\n".join(message.text for message in messages))
             return
-        validation_result = validate_with_binary(self.values)
+        validation_result = validate_with_binary(self.values, base_dir=self._base_dir())
         if not validation_result.ok:
             self._set_command_result(validation_result)
             return
-        generation_result = generate_nc_files(self.values)
+        generation_result = generate_nc_files(self.values, base_dir=self._base_dir())
         self._set_command_result(generation_result)
 
     def _show_validation_messages(self, messages: list[ValidationMessage]):
@@ -321,6 +321,11 @@ class Pcb2GCodeApp:
             self.status_text.value = f"pcb2gcode: {binary} ({version})"
         except FileNotFoundError as error:
             self.status_text.value = str(error)
+
+    def _base_dir(self) -> Path:
+        if self.current_millproject:
+            return self.current_millproject.parent
+        return Path.cwd()
 
 
 def run_app():

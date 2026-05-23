@@ -32,3 +32,16 @@ def test_format_millproject_writes_canonical_groups():
     assert "front=front.gbr" in content
     assert "# CNC" in content
     assert "zsafe=5" in content
+
+
+def test_format_millproject_stores_paths_relative_to_project_dir(tmp_path: Path):
+    content = format_millproject(
+        {
+            "front": str(tmp_path / "board-F.Cu.gbr"),
+            "output-dir": str(tmp_path / "nc"),
+        },
+        tmp_path,
+    )
+
+    assert "front=board-F.Cu.gbr" in content
+    assert "output-dir=nc" in content

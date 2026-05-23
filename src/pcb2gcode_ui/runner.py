@@ -1,11 +1,12 @@
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from pcb2gcode_ui.options import OPTION_SPECS, bool_value, default_output_directory
+from pcb2gcode_ui.options import FILE_OPTIONS, OPTION_SPECS, bool_value, default_output_directory
 
 LOGGER = logging.getLogger(__name__)
 PCB2GCODE_BINARY = "pcb2gcode"
@@ -34,7 +35,11 @@ def pcb2gcode_version(binary: str = "") -> CommandResult:
     return run_command([executable, "--version"], Path.cwd())
 
 
-def build_arguments(values: dict[str, str], include_output_dir: bool = True) -> list[str]:
+def build_arguments(
+    values: dict[str, str],
+    include_output_dir: bool = True,
+    base_dir: Path = None,
+) -> list[str]:
     args = ["--noconfigfile"]
     for spec in OPTION_SPECS:
         value = values.get(spec.key, "").strip()
@@ -44,25 +49,44 @@ def build_arguments(values: dict[str, str], include_output_dir: bool = True) -> 
             continue
         if spec.kind == "bool":
             value = "true" if bool_value(value) else "false"
+        elif spec.key in FILE_OPTIONS:
+            value = str(_resolve_path(value, base_dir))
+        elif spec.key == "output-dir":
+            value = str(_resolve_path(value, base_dir))
         args.append(f"--{spec.key}={value}")
     return args
 
 
-def validate_with_binary(values: dict[str, str], binary: str = "") -> CommandResult:
+def validate_with_binary(
+    values: dict[str, str],
+    binary: str = "",
+    base_dir: Path = None,
+) -> CommandResult:
     executable = binary or discover_binary()
-    args = [executable, *build_arguments(values, include_output_dir=False), "--no-export=true"]
+    args = [
+        executable,
+        *build_arguments(values, include_output_dir=False, base_dir=base_dir),
+        "--no-export=true",
+    ]
     with tempfile.TemporaryDirectory(prefix="pcb2gcode-ui-validate-") as temp_dir:
         LOGGER.debug("Validating pcb2gcode parameters in %r", temp_dir)
         return run_command(args, Path(temp_dir))
 
 
-def generate_nc_files(values: dict[str, str], binary: str = "") -> CommandResult:
+def generate_nc_files(
+    values: dict[str, str],
+    binary: str = "",
+    base_dir: Path = None,
+) -> CommandResult:
     executable = binary or discover_binary()
-    output_dir = Path(values.get("output-dir", "").strip() or default_output_directory(values))
+    output_value = values.get("output-dir", "").strip()
+    output_dir = (
+        _resolve_path(output_value, base_dir) if output_value else default_output_directory(values)
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     command_values = dict(values)
     command_values["output-dir"] = str(output_dir)
-    args = [executable, *build_arguments(command_values)]
+    args = [executable, *build_arguments(command_values, base_dir=base_dir)]
     LOGGER.debug("Generating NC files into %r", output_dir)
     return run_command(args, output_dir)
 
@@ -78,3 +102,10 @@ def run_command(command: list[str], cwd: Path) -> CommandResult:
         check=False,
     )
     return CommandResult(command=command, return_code=process.returncode, output=process.stdout)
+
+
+def _resolve_path(value: str, base_dir: Path = None) -> Path:
+    path = Path(os.path.expanduser(value))
+    if path.is_absolute():
+        return path
+    return (base_dir or Path.cwd()) / path
