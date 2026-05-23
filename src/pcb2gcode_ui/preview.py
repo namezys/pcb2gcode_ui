@@ -17,7 +17,11 @@ from pygerber.gerberx3.api.v2 import (
     PixelFormatEnum,
 )
 
-from pcb2gcode_ui.gcode_preview import GcodeMovementKind, GcodeSegment, GcodeTrace
+from pcb2gcode_ui.gcode_preview import (
+    GcodeMovementKind,
+    GcodeTrace,
+    gcode_instrument_color,
+)
 from pcb2gcode_ui.options import bool_value
 
 LOGGER = logging.getLogger(__name__)
@@ -43,6 +47,8 @@ GERBER_COORDINATE_RE = re.compile(
 )
 UNIT_MM = "mm"
 UNIT_INCH = "inch"
+GCODE_CUT_ALPHA = 235
+GCODE_RETRACT_ALPHA = 115
 
 
 class PreviewSide(StrEnum):
@@ -871,23 +877,30 @@ def _draw_gcode_trace(
     options: PreviewOptions,
 ):
     draw = ImageDraw.Draw(image)
+    instrument_colors = {
+        instrument.id: _hex_to_rgba(gcode_instrument_color(idx), GCODE_CUT_ALPHA)
+        for idx, instrument in enumerate(trace.active_instruments)
+    }
     for segment in trace.segments:
         start = _preview_point(segment.start.x_mm, segment.start.y_mm, bounds, settings, options)
         end = _preview_point(segment.end.x_mm, segment.end.y_mm, bounds, settings, options)
+        color = instrument_colors.get(
+            segment.instrument_id,
+            _hex_to_rgba(gcode_instrument_color(0), GCODE_CUT_ALPHA),
+        )
         if segment.movement == GcodeMovementKind.CUT:
             draw.line(
                 (start, end),
-                fill=_gcode_cut_color(segment),
+                fill=color,
                 width=max(round(options.dpmm * 0.08), 2),
             )
         else:
-            _draw_dashed_line(
+            _draw_dotted_line(
                 draw,
                 start,
                 end,
-                fill=(170, 178, 184, 85),
+                fill=(color[0], color[1], color[2], GCODE_RETRACT_ALPHA),
                 width=max(round(options.dpmm * 0.04), 1),
-                dash_px=max(round(options.dpmm * 0.6), 4),
                 gap_px=max(round(options.dpmm * 0.35), 3),
             )
 
@@ -908,13 +921,12 @@ def _preview_point(
     )
 
 
-def _draw_dashed_line(
+def _draw_dotted_line(
     draw: ImageDraw.ImageDraw,
     start: tuple[float, float],
     end: tuple[float, float],
     fill: tuple[int, int, int, int],
     width: int,
-    dash_px: int,
     gap_px: int,
 ):
     distance_x = end[0] - start[0]
@@ -922,38 +934,35 @@ def _draw_dashed_line(
     line_length = math.hypot(distance_x, distance_y)
     if line_length == 0:
         return
-    step = dash_px + gap_px
+    step = max(gap_px, 1)
+    radius = max(width, 1)
     position = 0.0
-    while position < line_length:
-        dash_end = min(position + dash_px, line_length)
-        first_ratio = position / line_length
-        second_ratio = dash_end / line_length
-        draw.line(
+    while position <= line_length:
+        ratio = position / line_length
+        center = (
+            start[0] + distance_x * ratio,
+            start[1] + distance_y * ratio,
+        )
+        draw.ellipse(
             (
-                (
-                    start[0] + distance_x * first_ratio,
-                    start[1] + distance_y * first_ratio,
-                ),
-                (
-                    start[0] + distance_x * second_ratio,
-                    start[1] + distance_y * second_ratio,
-                ),
+                center[0] - radius,
+                center[1] - radius,
+                center[0] + radius,
+                center[1] + radius,
             ),
             fill=fill,
-            width=width,
         )
         position += step
 
 
-def _gcode_cut_color(segment: GcodeSegment) -> tuple[int, int, int, int]:
-    colors = {
-        "front": (255, 214, 78, 230),
-        "back": (255, 105, 135, 230),
-        "drill": (90, 210, 255, 235),
-        "milldrill": (150, 185, 255, 235),
-        "outline": (255, 255, 255, 240),
-    }
-    return colors.get(segment.source_kind, (255, 214, 78, 230))
+def _hex_to_rgba(color: str, alpha: int) -> tuple[int, int, int, int]:
+    normalized = color.removeprefix("#")
+    return (
+        int(normalized[0:2], 16),
+        int(normalized[2:4], 16),
+        int(normalized[4:6], 16),
+        alpha,
+    )
 
 
 def _has_gcode(trace: GcodeTrace = None) -> bool:

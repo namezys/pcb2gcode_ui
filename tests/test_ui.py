@@ -272,7 +272,8 @@ def test_preview_content_uses_three_compact_control_rows():
     assert all(_is_default_checkbox(control) for control in second_row.controls[1:])
     assert all(_is_default_checkbox(control) for control in third_row.controls[1:])
     assert preview_status is app.preview_status
-    assert preview_canvas.content is app.preview_image
+    assert preview_canvas.content.controls[0] is app.preview_image
+    assert preview_canvas.content.controls[1] is app.gcode_instrument_overlay
     assert gcode_status is app.gcode_status
 
 
@@ -377,7 +378,10 @@ def test_base_dir_uses_working_directory_until_project_is_open(tmp_path: Path):
 def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     output_dir = tmp_path / "nc"
     output_dir.mkdir()
-    (output_dir / "front.ngc").write_text("G21\nT1 M6\nG0 X0 Y0 Z1\nG1 Z-0.1\nX1\n")
+    (output_dir / "front.ngc").write_text(
+        "G21\nT1 M6\nG0 X0 Y0 Z1\nG1 Z-0.1\nX1\nT1 M6\nX2\n",
+        encoding="utf-8",
+    )
     app = _app()
     app.preview_renderer = FakePreviewRenderer()
     app.values["output-dir"] = str(output_dir)
@@ -390,9 +394,14 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
 
     assert app.preview_gcode.value is True
     assert app.gcode_trace
-    assert "3 segment" in app.gcode_status.value
+    assert "4 segment" in app.gcode_status.value
     assert app.preview_renderer.show_gcode is True
     assert app.preview_renderer.gcode_trace.segments
+    assert app.gcode_instrument_overlay.visible is True
+    rows = app.gcode_instrument_overlay.content.controls
+    assert rows[0].value == "NC instruments"
+    assert rows[2].controls[2].value == "1"
+    assert rows[3].controls[2].value == "2"
 
 
 def test_gcode_visibility_checkbox_controls_render_options():
@@ -405,6 +414,7 @@ def test_gcode_visibility_checkbox_controls_render_options():
 
     assert app.preview_renderer.show_gcode is False
     assert app.preview_renderer.gcode_trace is None
+    assert app.gcode_instrument_overlay.visible is False
 
 
 def _app() -> Pcb2GCodeApp:

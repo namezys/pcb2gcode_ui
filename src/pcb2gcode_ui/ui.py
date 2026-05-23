@@ -4,7 +4,12 @@ from pathlib import Path
 
 import flet as ft
 
-from pcb2gcode_ui.gcode_preview import GcodeTrace, gcode_trace_summary, load_gcode_trace
+from pcb2gcode_ui.gcode_preview import (
+    GcodeTrace,
+    gcode_instrument_color,
+    gcode_trace_summary,
+    load_gcode_trace,
+)
 from pcb2gcode_ui.help_content import (
     GENERAL_HELP,
     OPTION_HELP_BY_KEY,
@@ -57,7 +62,10 @@ HELP_BUTTON_SIZE = 32
 LEGEND_LABEL_WIDTH = 190
 LEGEND_COLOR_WIDTH = 150
 LEGEND_SWATCH_SIZE = 18
+INSTRUMENT_OVERLAY_WIDTH = 330
+INSTRUMENT_SWATCH_SIZE = 14
 BODY_TEXT_SIZE = 12
+SMALL_TEXT_SIZE = 11
 SECTION_TITLE_SIZE = 15
 LABEL_TEXT_SIZE = 12
 PAGE_BACKGROUND_COLOR = ft.Colors.GREY_900
@@ -151,6 +159,16 @@ class Pcb2GCodeApp:
             fit=ft.BoxFit.CONTAIN,
             width=PREVIEW_IMAGE_WIDTH,
             height=PREVIEW_IMAGE_HEIGHT,
+        )
+        self.gcode_instrument_overlay = ft.Container(
+            visible=False,
+            right=10,
+            top=10,
+            width=INSTRUMENT_OVERLAY_WIDTH,
+            padding=8,
+            bgcolor=SURFACE_COLOR,
+            border=_border_all(),
+            border_radius=4,
         )
         self.preview_dialog: ft.AlertDialog = None
         self.help_dialog: ft.AlertDialog = None
@@ -316,7 +334,14 @@ class Pcb2GCodeApp:
                 ),
                 self.preview_status,
                 ft.Container(
-                    content=self.preview_image,
+                    content=ft.Stack(
+                        [
+                            self.preview_image,
+                            self.gcode_instrument_overlay,
+                        ],
+                        width=PREVIEW_IMAGE_WIDTH,
+                        height=PREVIEW_IMAGE_HEIGHT,
+                    ),
                     padding=8,
                     border=_border_all(),
                     border_radius=4,
@@ -773,6 +798,7 @@ class Pcb2GCodeApp:
                 layer_alpha=round(self.preview_alpha.value),
             ),
         )
+        self._set_gcode_instrument_overlay(gcode_trace)
         self._set_preview_result(result)
 
     def _set_preview_result(self, result: PreviewResult):
@@ -797,6 +823,30 @@ class Pcb2GCodeApp:
             if len(self.gcode_trace.warnings) > 4:
                 lines.append(f"{len(self.gcode_trace.warnings) - 4} more warning(s).")
         self.gcode_status.value = "\n".join(lines)
+
+    def _set_gcode_instrument_overlay(self, trace: GcodeTrace = None):
+        if not trace or not trace.active_instruments:
+            self.gcode_instrument_overlay.visible = False
+            self.gcode_instrument_overlay.content = None
+            return
+        rows: list[ft.Control] = [
+            ft.Text("NC instruments", color=TEXT_COLOR, size=BODY_TEXT_SIZE),
+            _instrument_overlay_header(),
+        ]
+        for idx, instrument in enumerate(trace.active_instruments):
+            cut_count, retract_count = trace.instrument_counts(instrument.id)
+            rows.append(
+                _instrument_overlay_row(
+                    color=gcode_instrument_color(idx),
+                    source_kind=instrument.source_kind,
+                    change_index=instrument.change_index,
+                    tool_id=instrument.tool_id,
+                    cut_count=cut_count,
+                    retract_count=retract_count,
+                )
+            )
+        self.gcode_instrument_overlay.content = ft.Column(rows, spacing=4)
+        self.gcode_instrument_overlay.visible = True
 
     def _selected_gcode_sources(self) -> set[str]:
         selected: set[str] = set()
@@ -957,6 +1007,59 @@ def _preview_color_legend_container(
         padding=8,
         bgcolor=bgcolor,
         border=_border_all(),
+    )
+
+
+def _instrument_overlay_header() -> ft.Row:
+    return ft.Row(
+        [
+            ft.Text("", width=INSTRUMENT_SWATCH_SIZE),
+            _small_table_text("NC", 54, TEXT_COLOR),
+            _small_table_text("Inst", 42, TEXT_COLOR),
+            _small_table_text("Tool", 48, TEXT_COLOR),
+            _small_table_text("Cut", 34, TEXT_COLOR),
+            _small_table_text("Pass", 42, TEXT_COLOR),
+        ],
+        spacing=6,
+    )
+
+
+def _instrument_overlay_row(
+    color: str,
+    source_kind: str,
+    change_index: int,
+    tool_id: str,
+    cut_count: int,
+    retract_count: int,
+) -> ft.Row:
+    return ft.Row(
+        [
+            ft.Container(
+                width=INSTRUMENT_SWATCH_SIZE,
+                height=INSTRUMENT_SWATCH_SIZE,
+                bgcolor=color,
+                border=_border_all(),
+            ),
+            _small_table_text(source_kind, 54, MUTED_TEXT_COLOR),
+            _small_table_text(str(change_index), 42, MUTED_TEXT_COLOR),
+            _small_table_text(tool_id, 48, MUTED_TEXT_COLOR),
+            _small_table_text(str(cut_count), 34, MUTED_TEXT_COLOR),
+            _small_table_text(str(retract_count), 42, MUTED_TEXT_COLOR),
+        ],
+        spacing=6,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
+def _small_table_text(value: str, width: int, color: ft.ColorValue) -> ft.Text:
+    return ft.Text(
+        value,
+        width=width,
+        color=color,
+        size=SMALL_TEXT_SIZE,
+        no_wrap=True,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
     )
 
 

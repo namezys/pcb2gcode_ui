@@ -13,7 +13,8 @@ Supported state:
 - `G20` and `G21` for inch/metric units.
 - `G90` and `G91` for absolute/incremental positioning.
 - `Tn` for active tool tracking.
-- `M6` as a recognized tool-change command with no motion effect.
+- `M6` as a tool-change instruction. Every `M6` creates a separate preview
+  instrument, even when it selects the same `Tn` tool again.
 - Modal `G0`/`G1` movement, including coordinate-only continuation lines.
 
 Supported movement:
@@ -29,8 +30,18 @@ Each linear segment is classified from the endpoint Z value:
 - `Z < 0`: cut segment.
 - `Z >= 0`: retract/travel segment.
 
-Cut segments are drawn bright and above the Gerber preview. Retract/travel segments
-are drawn as low-visibility dashed gray lines.
+Cut segments are drawn as solid colored lines above the Gerber preview. Retract/travel
+segments are drawn as dotted low-alpha lines in the same instrument color.
+
+## Instrument Colors
+
+The preview colors G-code by instrument instance rather than only by output file or tool number.
+An instrument instance is created for each `M6`; repeated `M6` commands with the same `Tn` still
+get separate colors. Movement before the first `M6` is grouped into an implicit instrument.
+
+The Preview dialog overlays an instrument table on the canvas for the active NC outputs. It shows
+the color, NC source, instrument change number, tool id, cut segment count, and pass/retract
+segment count.
 
 ## Output Files
 

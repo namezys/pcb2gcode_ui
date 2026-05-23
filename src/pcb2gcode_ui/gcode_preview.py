@@ -14,6 +14,7 @@ UNIT_MM = "mm"
 UNIT_INCH = "inch"
 INCH_TO_MM = 25.4
 DEFAULT_TOOL_ID = "none"
+IMPLICIT_INSTRUMENT_ID = "implicit"
 MOVEMENT_COMMANDS = {0, 1}
 SUPPORTED_G_CODES = {0, 1, 20, 21, 90, 91}
 SUPPORTED_M_CODES = {6}
@@ -24,6 +25,16 @@ OUTPUT_OPTIONS = (
     ("drill", "drill-output"),
     ("milldrill", "milldrill-output"),
     ("outline", "outline-output"),
+)
+GCODE_INSTRUMENT_COLORS = (
+    "#FFD64E",
+    "#FF6987",
+    "#5AD2FF",
+    "#96B9FF",
+    "#60D394",
+    "#C084FC",
+    "#FF9F1C",
+    "#F2F5EA",
 )
 
 
@@ -47,6 +58,16 @@ class GcodeSegment:
     tool_id: str
     source_kind: str
     line_number: int
+    instrument_id: str = IMPLICIT_INSTRUMENT_ID
+
+
+@dataclass(frozen=True)
+class GcodeInstrument:
+    id: str
+    tool_id: str
+    source_kind: str
+    change_index: int
+    line_number: int
 
 
 @dataclass(frozen=True)
@@ -61,6 +82,22 @@ class GcodeBounds:
 class GcodeTrace:
     segments: list[GcodeSegment]
     warnings: list[str]
+    instruments: list[GcodeInstrument] = None
+
+    def __post_init__(self):
+        instruments = self.instruments or []
+        known_instrument_ids = {instrument.id for instrument in instruments}
+        missing_segments = [
+            segment
+            for segment in self.segments
+            if segment.instrument_id not in known_instrument_ids
+        ]
+        if missing_segments or self.instruments is None:
+            object.__setattr__(
+                self,
+                "instruments",
+                [*instruments, *_implicit_instruments(missing_segments)],
+            )
 
     @property
     def cut_count(self) -> int:
@@ -91,10 +128,23 @@ class GcodeTrace:
         )
 
     def filtered(self, source_kinds: set[str]) -> "GcodeTrace":
-        return GcodeTrace(
-            [segment for segment in self.segments if segment.source_kind in source_kinds],
-            self.warnings,
+        segments = [segment for segment in self.segments if segment.source_kind in source_kinds]
+        instrument_ids = {segment.instrument_id for segment in segments}
+        instruments = [item for item in self.instruments if item.id in instrument_ids]
+        return GcodeTrace(segments, self.warnings, instruments)
+
+    @property
+    def active_instruments(self) -> tuple[GcodeInstrument, ...]:
+        instrument_ids = {segment.instrument_id for segment in self.segments}
+        return tuple(item for item in self.instruments if item.id in instrument_ids)
+
+    def instrument_counts(self, instrument_id: str) -> tuple[int, int]:
+        segments = [segment for segment in self.segments if segment.instrument_id == instrument_id]
+        cut_count = sum(1 for segment in segments if segment.movement == GcodeMovementKind.CUT)
+        retract_count = sum(
+            1 for segment in segments if segment.movement == GcodeMovementKind.RETRACT
         )
+        return cut_count, retract_count
 
 
 @dataclass
@@ -104,6 +154,8 @@ class InterpreterState:
     absolute: bool = True
     active_movement: int = 0
     active_tool: str = DEFAULT_TOOL_ID
+    active_instrument_id: str = IMPLICIT_INSTRUMENT_ID
+    tool_change_count: int = 0
 
 
 class GcodeInterpreter:
@@ -123,7 +175,9 @@ class GcodeInterpreter:
 
     def parse(self, text: str, source_kind: str) -> GcodeTrace:
         state = InterpreterState(GcodePoint(0, 0, 0))
+        state.active_instrument_id = f"{source_kind}-implicit"
         segments: list[GcodeSegment] = []
+        instruments: list[GcodeInstrument] = []
         warnings: list[str] = []
         unsupported_commands: set[str] = set()
 
@@ -136,13 +190,14 @@ class GcodeInterpreter:
                     source_kind,
                     state,
                     segments,
+                    instruments,
                     unsupported_commands,
                 )
         warnings.extend(
             f"Ignored unsupported command {command}."
             for command in sorted(unsupported_commands)
         )
-        return GcodeTrace(segments, warnings)
+        return GcodeTrace(segments, warnings, instruments or None)
 
     def _process_line(
         self,
@@ -151,6 +206,7 @@ class GcodeInterpreter:
         source_kind: str,
         state: InterpreterState,
         segments: list[GcodeSegment],
+        instruments: list[GcodeInstrument],
         unsupported_commands: set[str],
     ):
         command_letter, command_number = line.command
@@ -162,12 +218,16 @@ class GcodeInterpreter:
                 source_kind,
                 state,
                 segments,
+                instruments,
                 unsupported_commands,
             )
         elif command_letter == "T" and command_number is not None:
             state.active_tool = str(command_number)
-        elif command_letter == "M" and command_number not in SUPPORTED_M_CODES:
-            unsupported_commands.add(f"M{command_number}")
+        elif command_letter == "M":
+            if command_number == 6:
+                self._change_instrument(line, line_number, source_kind, state, instruments)
+            elif command_number not in SUPPORTED_M_CODES:
+                unsupported_commands.add(f"M{command_number}")
 
     def _process_g_code(
         self,
@@ -177,6 +237,7 @@ class GcodeInterpreter:
         source_kind: str,
         state: InterpreterState,
         segments: list[GcodeSegment],
+        instruments: list[GcodeInstrument],
         unsupported_commands: set[str],
     ):
         if command_number not in SUPPORTED_G_CODES:
@@ -197,6 +258,30 @@ class GcodeInterpreter:
         if command_number in MOVEMENT_COMMANDS:
             state.active_movement = command_number
             self._move(line, line_number, source_kind, state, segments)
+
+    def _change_instrument(
+        self,
+        line: GcodeLine,
+        line_number: int,
+        source_kind: str,
+        state: InterpreterState,
+        instruments: list[GcodeInstrument],
+    ):
+        tool_param = line.params.get("T")
+        if tool_param is not None:
+            state.active_tool = _format_tool_id(tool_param)
+        state.tool_change_count += 1
+        instrument_id = f"{source_kind}-{state.tool_change_count}"
+        instruments.append(
+            GcodeInstrument(
+                id=instrument_id,
+                tool_id=state.active_tool,
+                source_kind=source_kind,
+                change_index=state.tool_change_count,
+                line_number=line_number,
+            )
+        )
+        state.active_instrument_id = instrument_id
 
     def _move(
         self,
@@ -222,6 +307,7 @@ class GcodeInterpreter:
                 tool_id=state.active_tool,
                 source_kind=source_kind,
                 line_number=line_number,
+                instrument_id=state.active_instrument_id,
             )
         )
         state.position = next_position
@@ -234,6 +320,7 @@ def load_gcode_trace(
 ) -> GcodeTrace:
     interpreter = GcodeInterpreter()
     segments: list[GcodeSegment] = []
+    instruments: list[GcodeInstrument] = []
     warnings: list[str] = []
     for source_kind, option_key in OUTPUT_OPTIONS:
         if source_kinds and source_kind not in source_kinds:
@@ -244,8 +331,9 @@ def load_gcode_trace(
             continue
         trace = interpreter.parse_file(path, source_kind)
         segments.extend(trace.segments)
+        instruments.extend(trace.instruments)
         warnings.extend(trace.warnings)
-    return GcodeTrace(segments, warnings)
+    return GcodeTrace(segments, warnings, instruments)
 
 
 def gcode_trace_summary(trace: GcodeTrace) -> str:
@@ -256,10 +344,37 @@ def gcode_trace_summary(trace: GcodeTrace) -> str:
     )
 
 
+def gcode_instrument_color(index: int) -> str:
+    return GCODE_INSTRUMENT_COLORS[index % len(GCODE_INSTRUMENT_COLORS)]
+
+
 def _normalize_modal_line(raw_line: str, active_movement: int) -> str:
     if COORDINATE_ONLY_RE.match(raw_line):
         return f"G{active_movement} {raw_line}"
     return raw_line
+
+
+def _format_tool_id(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _implicit_instruments(segments: list[GcodeSegment]) -> list[GcodeInstrument]:
+    source_by_instrument = {
+        segment.instrument_id: segment.source_kind
+        for segment in segments
+    }
+    return [
+        GcodeInstrument(
+            id=instrument_id,
+            tool_id=DEFAULT_TOOL_ID,
+            source_kind=source_kind,
+            change_index=0,
+            line_number=0,
+        )
+        for instrument_id, source_kind in sorted(source_by_instrument.items())
+    ]
 
 
 def _next_position(state: InterpreterState, params: dict[str, float]) -> GcodePoint:

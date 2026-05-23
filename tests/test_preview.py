@@ -4,6 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 from pcb2gcode_ui.gcode_preview import (
+    GcodeInstrument,
     GcodeMovementKind,
     GcodePoint,
     GcodeSegment,
@@ -367,8 +368,87 @@ def test_compose_preview_draws_gcode_cut_over_retract():
         trace,
     )
 
-    assert image.getpixel((5, 5))[0] > image.getpixel((5, 9))[0]
+    assert image.getpixel((5, 5))[3] > image.getpixel((5, 9))[3]
     assert image.getpixel((5, 5))[:3] != (32, 35, 38)
+
+
+def test_compose_preview_colors_gcode_by_instrument():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 2, -0.1),
+                GcodePoint(10, 2, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+                "front-1",
+            ),
+            GcodeSegment(
+                GcodePoint(0, 8, -0.1),
+                GcodePoint(10, 8, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                2,
+                "front-2",
+            ),
+        ],
+        [],
+        [
+            GcodeInstrument("front-1", "1", "front", 1, 1),
+            GcodeInstrument("front-2", "1", "front", 2, 2),
+        ],
+    )
+    settings = _preview_settings(Bounds(0, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(0, 0, 10, 10),
+        settings,
+        PreviewOptions(show_front=False, show_drill=False, show_cutoff=False, show_gcode=True),
+        trace,
+    )
+
+    assert image.getpixel((120, 192))[:3] != image.getpixel((120, 48))[:3]
+
+
+def test_compose_preview_draws_retract_as_dots():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, 1),
+                GcodePoint(10, 5, 1),
+                GcodeMovementKind.RETRACT,
+                "1",
+                "front",
+                1,
+                "front-1",
+            ),
+        ],
+        [],
+        [GcodeInstrument("front-1", "1", "front", 1, 1)],
+    )
+    settings = _preview_settings(Bounds(0, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(0, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((0, 50))[:3] != (32, 35, 38)
+    assert image.getpixel((2, 50))[:3] == (32, 35, 38)
 
 
 def test_compose_preview_back_side_mirrors_gcode_horizontally():
