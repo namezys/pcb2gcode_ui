@@ -11,7 +11,14 @@ def test_default_output_directory_uses_first_input_parent(tmp_path: Path):
 
 
 def test_build_arguments_uses_noconfigfile_and_key_value_flags():
-    args = build_arguments({"metric": "true", "front": "front.gbr", "output-dir": "nc"})
+    args = build_arguments(
+        {
+            "metric": "true",
+            "front": "front.gbr",
+            "output-dir": "nc",
+            "backtrack": "inf",
+        }
+    )
 
     assert args == [
         "--noconfigfile",

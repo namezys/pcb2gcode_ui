@@ -45,6 +45,8 @@ def build_arguments(
         value = values.get(spec.key, "").strip()
         if not value:
             continue
+        if value == spec.default:
+            continue
         if spec.key == "output-dir" and not include_output_dir:
             continue
         if spec.kind == "bool":
