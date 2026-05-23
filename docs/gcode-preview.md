@@ -39,10 +39,11 @@ segments are drawn as dotted low-alpha lines in the same tool color.
 The preview colors G-code by NC file and active tool id. Movement before any tool selection is
 grouped into an initial `none` tool path, so it remains visible instead of being merged or skipped.
 
-The Preview dialog overlays a tool table on the canvas for the active NC outputs. It shows the NC
-source, path number, tool id, cut segment count, and pass/retract segment count. The path number
-uses the same color as the rendered tool path. Rows are separated when the table moves to another
-NC file.
+The Preview dialog overlays a tool table on the canvas for the active NC outputs. File groups are
+introduced by labeled separators using the loaded NC filename. The table shows path number, tool
+id, cut segment count, and pass/retract segment count. Pass-only tools are omitted from the table,
+but their dotted travel paths remain visible on the canvas. The path number uses the same color as
+the rendered tool path.
 
 ## Output Files
 

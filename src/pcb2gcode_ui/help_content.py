@@ -85,7 +85,7 @@ PREVIEW_HELP = GeneralHelp(
         "zero-start, and tiling. G-code preview is a visual aid: it currently draws linear "
         "`G0`/`G1` movement only, treats a segment as a cut when either endpoint has "
         "`Z < 0`, colors paths by active tool id per NC file, and keeps generated NC files as "
-        "the source of truth."
+        "the source of truth. The overlay table omits tools with only pass/retract moves."
     ),
 )
 

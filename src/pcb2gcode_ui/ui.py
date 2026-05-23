@@ -846,21 +846,23 @@ class Pcb2GCodeApp:
             ft.Text("NC tools", color=TEXT_COLOR, size=BODY_TEXT_SIZE),
             _instrument_overlay_header(),
         ]
-        previous_source_kind = ""
-        for idx, tool_path, cut_count, retract_count in visible_instruments:
-            if previous_source_kind and previous_source_kind != tool_path.source_kind:
-                rows.append(_instrument_overlay_separator())
+        previous_source_label = ""
+        for visible_idx, (idx, tool_path, cut_count, retract_count) in enumerate(
+            visible_instruments,
+            start=1,
+        ):
+            if previous_source_label != tool_path.source_label:
+                rows.append(_instrument_overlay_separator(tool_path.source_label))
             rows.append(
                 _instrument_overlay_row(
                     color=gcode_instrument_color(idx),
-                    source_kind=tool_path.source_kind,
-                    path_index=tool_path.order_index + 1,
+                    path_index=visible_idx,
                     tool_id=tool_path.tool_id,
                     cut_count=cut_count,
                     retract_count=retract_count,
                 )
             )
-            previous_source_kind = tool_path.source_kind
+            previous_source_label = tool_path.source_label
         self.gcode_instrument_overlay.content = ft.Column(rows, spacing=4)
         self.gcode_instrument_overlay.visible = True
 
@@ -1029,7 +1031,6 @@ def _preview_color_legend_container(
 def _instrument_overlay_header() -> ft.Row:
     return ft.Row(
         [
-            _small_table_text("NC", 54, TEXT_COLOR),
             _small_table_text("Path", 42, TEXT_COLOR),
             _small_table_text("Tool", 48, TEXT_COLOR),
             _small_table_text("Cut", 34, TEXT_COLOR),
@@ -1041,7 +1042,6 @@ def _instrument_overlay_header() -> ft.Row:
 
 def _instrument_overlay_row(
     color: str,
-    source_kind: str,
     path_index: int,
     tool_id: str,
     cut_count: int,
@@ -1049,7 +1049,6 @@ def _instrument_overlay_row(
 ) -> ft.Row:
     return ft.Row(
         [
-            _small_table_text(source_kind, 54, MUTED_TEXT_COLOR),
             _small_table_text(str(path_index), 42, color),
             _small_table_text(tool_id, 48, MUTED_TEXT_COLOR),
             _small_table_text(str(cut_count), 34, MUTED_TEXT_COLOR),
@@ -1060,10 +1059,11 @@ def _instrument_overlay_row(
     )
 
 
-def _instrument_overlay_separator() -> ft.Container:
+def _instrument_overlay_separator(label: str) -> ft.Container:
     return ft.Container(
-        height=1,
-        bgcolor=OUTLINE_COLOR,
+        content=ft.Text(label, color=TEXT_COLOR, size=SMALL_TEXT_SIZE),
+        padding=ft.Padding(left=0, top=4, right=0, bottom=2),
+        border=ft.Border(bottom=ft.BorderSide(width=1, color=OUTLINE_COLOR)),
         width=INSTRUMENT_OVERLAY_WIDTH - 16,
     )
 
@@ -1074,6 +1074,8 @@ def _visible_instrument_rows(
     rows: list[tuple[int, GcodeToolPath, int, int]] = []
     for idx, tool_path in enumerate(trace.active_tool_paths):
         cut_count, retract_count = trace.tool_path_counts(tool_path.id)
+        if cut_count == 0:
+            continue
         rows.append((idx, tool_path, cut_count, retract_count))
     return rows
 

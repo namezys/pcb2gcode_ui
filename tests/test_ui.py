@@ -413,15 +413,14 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     assert app.gcode_instrument_overlay.visible is True
     rows = app.gcode_instrument_overlay.content.controls
     assert rows[0].value == "NC tools"
-    assert rows[1].controls[0].value == "NC"
-    assert rows[1].controls[1].value == "Path"
-    assert rows[2].controls[0].value == "front"
-    assert rows[2].controls[1].value == "1"
-    assert rows[2].controls[2].value == "1"
-    assert rows[2].controls[3].value == "3"
-    assert rows[2].controls[4].value == "1"
-    assert rows[2].controls[1].color == gcode_instrument_color(0)
-    assert len(rows) == 3
+    assert rows[1].controls[0].value == "Path"
+    assert rows[2].content.value == "front.ngc"
+    assert rows[3].controls[0].value == "1"
+    assert rows[3].controls[1].value == "1"
+    assert rows[3].controls[2].value == "3"
+    assert rows[3].controls[3].value == "1"
+    assert rows[3].controls[0].color == gcode_instrument_color(0)
+    assert len(rows) == 4
 
 
 def test_gcode_instrument_overlay_separates_nc_files():
@@ -437,9 +436,10 @@ def test_gcode_instrument_overlay_separates_nc_files():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[2].controls[0].value == "front"
-    assert isinstance(rows[3], ft.Container)
-    assert rows[4].controls[0].value == "back"
+    assert rows[2].content.value == "front"
+    assert rows[3].controls[1].value == "1"
+    assert rows[4].content.value == "back"
+    assert rows[5].controls[1].value == "2"
 
 
 def test_gcode_instrument_overlay_keeps_initial_tool_path():
@@ -452,9 +452,25 @@ def test_gcode_instrument_overlay_keeps_initial_tool_path():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert [row.controls[1].value for row in rows[2:]] == ["1", "2"]
-    assert [row.controls[2].value for row in rows[2:]] == ["none", "1"]
-    assert rows[2].controls[4].value == "1"
+    assert rows[2].content.value == "front"
+    assert [row.controls[0].value for row in rows[3:]] == ["1"]
+    assert [row.controls[1].value for row in rows[3:]] == ["1"]
+    assert rows[3].controls[3].value == "0"
+
+
+def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
+    app = _app()
+    trace = GcodeInterpreter().parse(
+        "G21\nT2 M6\nG0 X0 Y0 Z1\nT1 M6\nG1 Z-0.1\nX1\n",
+        "front",
+    )
+
+    app._set_gcode_instrument_overlay(trace)
+
+    rows = app.gcode_instrument_overlay.content.controls
+    assert rows[2].content.value == "front"
+    assert [row.controls[1].value for row in rows[3:]] == ["1"]
+    assert trace.retract_count == 1
 
 
 def test_gcode_visibility_checkbox_controls_render_options():

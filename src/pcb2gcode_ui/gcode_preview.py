@@ -59,6 +59,7 @@ class GcodeSegment:
     source_kind: str
     line_number: int
     instrument_id: str = IMPLICIT_INSTRUMENT_ID
+    source_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class GcodeToolPath:
     id: str
     tool_id: str
     source_kind: str
+    source_label: str
     order_index: int
     line_number: int
 
@@ -169,6 +171,7 @@ class GcodeTrace:
                     id=id,
                     tool_id=segment.tool_id,
                     source_kind=segment.source_kind,
+                    source_label=segment.source_label or segment.source_kind,
                     order_index=len(tool_paths),
                     line_number=segment.line_number,
                 )
@@ -196,6 +199,7 @@ class InterpreterState:
     active_movement: int = 0
     active_tool: str = DEFAULT_TOOL_ID
     active_instrument_id: str = IMPLICIT_INSTRUMENT_ID
+    source_label: str = ""
     tool_change_count: int = 0
 
 
@@ -205,7 +209,7 @@ class GcodeInterpreter:
             raw_text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError as error:
             return GcodeTrace([], [f"Could not read {path.name}: {error}"])
-        trace = self.parse(raw_text, source_kind)
+        trace = self.parse(raw_text, source_kind, path.name)
         LOGGER.debug(
             "Parsed %s G-code segment(s) from %r as %s",
             len(trace.segments),
@@ -214,9 +218,10 @@ class GcodeInterpreter:
         )
         return trace
 
-    def parse(self, text: str, source_kind: str) -> GcodeTrace:
+    def parse(self, text: str, source_kind: str, source_label: str = "") -> GcodeTrace:
         state = InterpreterState(GcodePoint(0, 0, 0))
         state.active_instrument_id = f"{source_kind}-implicit"
+        state.source_label = source_label or source_kind
         segments: list[GcodeSegment] = []
         instruments: list[GcodeInstrument] = []
         warnings: list[str] = []
@@ -345,6 +350,7 @@ class GcodeInterpreter:
                 source_kind=source_kind,
                 line_number=line_number,
                 instrument_id=state.active_instrument_id,
+                source_label=state.source_label,
             )
         )
         state.position = next_position

@@ -59,8 +59,8 @@ def test_interpreter_tracks_m6_but_collects_paths_by_tool():
         "front-3",
     ]
     assert trace.active_tool_paths == (
-        GcodeToolPath("front:2", "2", "front", 0, 2),
-        GcodeToolPath("front:7", "7", "front", 1, 6),
+        GcodeToolPath("front:2", "2", "front", "front", 0, 2),
+        GcodeToolPath("front:7", "7", "front", "front", 1, 6),
     )
 
 
@@ -129,8 +129,8 @@ def test_interpreter_keeps_initial_path_as_initial_tool():
     assert [segment.tool_id for segment in trace.segments] == ["none", "4"]
     assert trace.segments[-1].instrument_id == "front-1"
     assert trace.active_tool_paths == (
-        GcodeToolPath("front:none", "none", "front", 0, 2),
-        GcodeToolPath("front:4", "4", "front", 1, 4),
+        GcodeToolPath("front:none", "none", "front", "front", 0, 2),
+        GcodeToolPath("front:4", "4", "front", "front", 1, 4),
     )
 
 
@@ -172,6 +172,10 @@ def test_load_gcode_trace_reads_configured_output_files(tmp_path: Path):
 
     assert len(trace.segments) == 3
     assert trace.tools == ("3",)
+    assert {segment.source_label for segment in trace.segments} == {"front.nc"}
+    assert trace.active_tool_paths == (
+        GcodeToolPath("front:3", "3", "front", "front.nc", 0, 3),
+    )
     assert trace.instruments == [GcodeInstrument("front-1", "3", "front", 1, 2)]
     assert any("Missing back NC file" in warning for warning in trace.warnings)
 

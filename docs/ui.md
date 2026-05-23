@@ -74,7 +74,8 @@ G-code preview reads configured output files from the output directory using `gc
 small local movement interpreter. It draws only linear `G0`/`G1` traces: a segment is a cut when
 either endpoint has `Z < 0`; otherwise it is a retract/travel move. Cut lines are solid;
 retract/travel lines are dotted. The preview colors paths by active tool id per NC file and
-overlays a tool table for active NC files. See [gcode-preview.md](gcode-preview.md) for the
+overlays a tool table for active NC files. The tool table labels each NC file group and omits
+tools that contain only pass/retract moves. See [gcode-preview.md](gcode-preview.md) for the
 supported subset.
 
 ## Validation
