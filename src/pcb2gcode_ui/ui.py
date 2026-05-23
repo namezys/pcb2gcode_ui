@@ -35,6 +35,8 @@ class Pcb2GCodeApp:
         self.directory_picker = ft.FilePicker()
         self.save_picker = ft.FilePicker()
         self.status_text = ft.Text()
+        self.group_container = ft.Column(spacing=8)
+        self.group_controls: dict[str, ft.Control] = {}
         self.command_output = ft.TextField(
             label="Command output",
             multiline=True,
@@ -55,11 +57,10 @@ class Pcb2GCodeApp:
                     self._build_toolbar(),
                     self.status_text,
                     self._build_file_section(),
-                    self._build_tabs(),
+                    self._build_parameter_sections(),
                     self.command_output,
                 ],
                 spacing=12,
-                expand=True,
             )
         )
 
@@ -130,7 +131,7 @@ class Pcb2GCodeApp:
             ]
         )
 
-    def _build_tabs(self) -> ft.Control:
+    def _build_parameter_sections(self) -> ft.Control:
         groups = []
         for spec in OPTION_SPECS:
             if (
@@ -140,17 +141,29 @@ class Pcb2GCodeApp:
             ):
                 groups.append(spec.group)
         tab_groups = [group for group in groups if group != "Files"]
-        return ft.Tabs(
-            content=ft.Column(
-                [
-                    ft.TabBar(tabs=[ft.Tab(label=group) for group in tab_groups]),
-                    ft.TabBarView(controls=[self._build_group(group) for group in tab_groups]),
-                ],
-                expand=True,
-            ),
-            length=len(tab_groups),
-            expand=True,
+        self.group_controls = {group: self._build_group(group) for group in tab_groups}
+        self.group_container.controls = [self.group_controls[tab_groups[0]]]
+        return ft.Column(
+            [
+                ft.SegmentedButton(
+                    segments=[
+                        ft.Segment(value=group, label=ft.Text(group)) for group in tab_groups
+                    ],
+                    selected=[tab_groups[0]],
+                    on_change=self._select_parameter_group,
+                ),
+                self.group_container,
+            ],
+            spacing=10,
         )
+
+    def _select_parameter_group(self, event):
+        selected = list(event.control.selected)
+        if not selected:
+            return
+        group = selected[0]
+        self.group_container.controls = [self.group_controls[group]]
+        self.page.update()
 
     def _build_group(self, group: str) -> ft.Control:
         rows = [
@@ -159,8 +172,16 @@ class Pcb2GCodeApp:
             if spec.group == group and spec.key not in FILE_OPTIONS and spec.key != "output-dir"
         ]
         return ft.Container(
-            content=ft.Column(rows, scroll=ft.ScrollMode.AUTO, spacing=8),
+            content=ft.Column(
+                [
+                    ft.Text(group, size=18, weight=ft.FontWeight.BOLD),
+                    *rows,
+                ],
+                spacing=8,
+            ),
             padding=10,
+            border=_border_all(),
+            border_radius=6,
         )
 
     def _build_option_row(self, spec: OptionSpec) -> ft.Control:
