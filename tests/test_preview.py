@@ -147,6 +147,45 @@ def test_render_preview_can_show_single_aux_layer():
     assert result.layer_count == 1
 
 
+def test_render_preview_uses_cutoff_fallback_for_eagle_profile(tmp_path: Path):
+    profile_path = tmp_path / "profile.gbr"
+    profile_path.write_text(
+        "\n".join(
+            [
+                "G04 EAGLE Gerber RS-274X export*",
+                "G75*",
+                "%MOMM*%",
+                "%FSLAX34Y34*%",
+                "%LPD*%",
+                "%IN*%",
+                "%IPPOS*%",
+                "%ADD10C,0.254000*%",
+                "D10*",
+                "X49530Y25400D02*",
+                "X190300Y25400D01*",
+                "X190300Y314200D01*",
+                "X49530Y314200D01*",
+                "X49530Y25400D01*",
+                "M02*",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = GerberPreviewRenderer().render(
+        {"outline": str(profile_path), "metric": "true"},
+        tmp_path,
+        PreviewOptions(show_front=False, show_drill=False, dpmm=4),
+    )
+
+    assert result.ok
+    assert result.layer_count == 1
+    assert result.warnings == []
+    image = Image.open(BytesIO(result.png))
+    assert image.width > 50
+    assert image.height > 100
+
+
 def test_apply_alpha_changes_layer_alpha_channel():
     image = Image.new("RGBA", (1, 1), (10, 20, 30, 200))
 
@@ -186,6 +225,97 @@ def test_parse_drill_file_reads_decimal_metric_hits(tmp_path: Path):
     assert layer.hits[0].x_mm == 1.5
     assert layer.hits[0].y_mm == 2.5
     assert layer.hits[0].diameter_mm == 0.8
+
+
+def test_parse_drill_file_reads_metric_implied_decimal_hits(tmp_path: Path):
+    drill_path = tmp_path / "board.xln"
+    drill_path.write_text(
+        "\n".join(
+            [
+                "M48",
+                "METRIC,TZ,000.000",
+                "T1C1.016",
+                "%",
+                "M71",
+                "T1",
+                "X7620Y6350",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    layer = _parse_drill_file(drill_path)
+
+    assert not layer.warnings
+    assert len(layer.hits) == 1
+    assert layer.hits[0].x_mm == 7.62
+    assert layer.hits[0].y_mm == 6.35
+    assert layer.hits[0].diameter_mm == 1.016
+
+
+def test_render_preview_with_implied_decimal_drill_file(tmp_path: Path):
+    drill_path = tmp_path / "board.xln"
+    drill_path.write_text(
+        "\n".join(
+            [
+                "M48",
+                "METRIC,TZ,000.000",
+                "T1C1.016",
+                "%",
+                "M71",
+                "T1",
+                "X7620Y6350",
+                "X10160Y6350",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = GerberPreviewRenderer().render(
+        {"drill": str(drill_path), "metric": "true"},
+        tmp_path,
+        PreviewOptions(show_front=False, show_cutoff=False),
+    )
+
+    assert result.ok
+    image = Image.open(BytesIO(result.png))
+    assert image.width < 300
+    assert image.height < 300
+
+
+def test_render_preview_rejects_oversized_canvas(monkeypatch, tmp_path: Path):
+    drill_path = tmp_path / "board.xln"
+    drill_path.write_text(
+        "\n".join(
+            [
+                "M48",
+                "METRIC",
+                "T1C1.000",
+                "%",
+                "T1",
+                "X99999999Y99999999",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    front_path = tmp_path / "front.gbr"
+    front_path.write_text("", encoding="utf-8")
+    layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+
+    monkeypatch.setattr(GerberPreviewRenderer, "_render_gerber_layers", lambda *args: [layer])
+
+    result = GerberPreviewRenderer().render(
+        {"front": str(front_path), "drill": str(drill_path), "metric": "true"},
+        tmp_path,
+        PreviewOptions(show_cutoff=False),
+    )
+
+    assert not result.ok
+    assert any("Preview canvas is too large" in warning for warning in result.warnings)
 
 
 def test_transform_point_applies_zero_start_offsets():

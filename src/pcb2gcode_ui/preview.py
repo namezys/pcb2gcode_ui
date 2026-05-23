@@ -24,10 +24,22 @@ DEFAULT_PREVIEW_DPMM = 24
 DEFAULT_LAYER_ALPHA = 85
 MAX_ALPHA = 255
 MIN_CANVAS_SIZE = 1
+MAX_PREVIEW_PIXELS = 50_000_000
 BOARD_PADDING_MM = 2.0
 DEFAULT_DRILL_DIAMETER_MM = 0.8
 COORDINATE_RE = re.compile(r"(?P<axis>[XY])(?P<value>[+-]?\d+(?:\.\d+)?)")
 TOOL_RE = re.compile(r"^T(?P<id>\d+)(?:C(?P<diameter>[+-]?\d+(?:\.\d+)?))?")
+DRILL_FORMAT_RE = re.compile(r"(?<!\d)(?P<integer>0+)\.(?P<decimal>0+)(?!\d)")
+GERBER_FORMAT_RE = re.compile(
+    r"%FSLAX(?P<x_integer>\d)(?P<x_decimal>\d)Y(?P<y_integer>\d)(?P<y_decimal>\d)\*%"
+)
+GERBER_APERTURE_RE = re.compile(
+    r"%ADD(?P<id>\d+)C,(?P<diameter>[+-]?\d+(?:\.\d+)?)\*%"
+)
+GERBER_D_CODE_RE = re.compile(r"^D(?P<id>\d+)\*$")
+GERBER_COORDINATE_RE = re.compile(
+    r"^(?:X(?P<x>[+-]?\d+))?(?:Y(?P<y>[+-]?\d+))?D(?P<operation>0[12])\*$"
+)
 UNIT_MM = "mm"
 UNIT_INCH = "inch"
 
@@ -127,6 +139,28 @@ class DrillLayer:
     warnings: list[str]
 
 
+@dataclass
+class DrillFormat:
+    unit: str = UNIT_INCH
+    decimal_places: int = 0
+
+
+@dataclass
+class GerberFormat:
+    unit: str = UNIT_INCH
+    x_decimal_places: int = 0
+    y_decimal_places: int = 0
+
+
+@dataclass(frozen=True)
+class GerberSegment:
+    start_x_mm: float
+    start_y_mm: float
+    end_x_mm: float
+    end_y_mm: float
+    diameter_mm: float
+
+
 @dataclass(frozen=True)
 class TransformSettings:
     metric: bool
@@ -165,6 +199,27 @@ class GerberPreviewRenderer:
         if not transformed_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
 
+        width_px, height_px, pixel_count = _preview_canvas_size(
+            transformed_bounds,
+            settings,
+            options,
+        )
+        LOGGER.debug(
+            "Preview bounds %r at %s dpmm produce canvas %sx%s (%s pixels)",
+            transformed_bounds,
+            options.dpmm,
+            width_px,
+            height_px,
+            pixel_count,
+        )
+        if pixel_count > MAX_PREVIEW_PIXELS:
+            warning = (
+                f"Preview canvas is too large ({width_px}x{height_px} pixels). "
+                "Check drill coordinate format or lower preview quality."
+            )
+            LOGGER.warning("%s", warning)
+            return PreviewResult(b"", [*warnings, warning], 0)
+
         image = _compose_preview(
             rendered_layers,
             drill_layer,
@@ -198,6 +253,11 @@ class GerberPreviewRenderer:
                     )
                 )
             except Exception as error:
+                if layer.kind == PreviewLayerKind.CUTOFF:
+                    fallback_layer = _render_cutoff_fallback(layer.path, options, error)
+                    if fallback_layer:
+                        rendered_layers.append(fallback_layer)
+                        continue
                 LOGGER.exception("Failed to render Gerber preview for %r", layer.path)
                 warnings.append(f"Could not render {layer.path.name}: {error}")
         return rendered_layers
@@ -299,7 +359,7 @@ def _parse_drill_file(path: Path) -> DrillLayer:
     hits: list[DrillHit] = []
     tools: dict[str, float] = {}
     active_tool = ""
-    unit = UNIT_INCH
+    drill_format = DrillFormat()
     current_x: float = None
     current_y: float = None
     try:
@@ -312,18 +372,21 @@ def _parse_drill_file(path: Path) -> DrillLayer:
         if not line or line.startswith(";"):
             continue
         if "METRIC" in line or line == "M71":
-            unit = UNIT_MM
+            drill_format.unit = UNIT_MM
+            _update_drill_decimal_places(line, drill_format)
             continue
         if "INCH" in line or line == "M72":
-            unit = UNIT_INCH
+            drill_format.unit = UNIT_INCH
+            _update_drill_decimal_places(line, drill_format)
             continue
+        _update_drill_decimal_places(line, drill_format)
         tool_match = TOOL_RE.match(line)
         if tool_match:
             tool_id = tool_match.group("id")
             diameter = tool_match.group("diameter")
             active_tool = tool_id
             if diameter:
-                tools[tool_id] = _unit_to_mm(float(diameter), unit)
+                tools[tool_id] = _unit_to_mm(float(diameter), drill_format.unit)
             continue
         coordinate_values = {
             match.group("axis"): match.group("value")
@@ -332,9 +395,9 @@ def _parse_drill_file(path: Path) -> DrillLayer:
         if not coordinate_values:
             continue
         if "X" in coordinate_values:
-            current_x = _unit_to_mm(float(coordinate_values["X"]), unit)
+            current_x = _drill_coordinate_to_mm(coordinate_values["X"], drill_format)
         if "Y" in coordinate_values:
-            current_y = _unit_to_mm(float(coordinate_values["Y"]), unit)
+            current_y = _drill_coordinate_to_mm(coordinate_values["Y"], drill_format)
         if current_x is None or current_y is None:
             warnings.append(f"Skipping drill hit without X/Y at line #{line_number}.")
             continue
@@ -342,7 +405,168 @@ def _parse_drill_file(path: Path) -> DrillLayer:
         if not active_tool:
             warnings.append(f"Using default drill diameter at line #{line_number}.")
         hits.append(DrillHit(current_x, current_y, diameter_mm))
+    if hits:
+        LOGGER.debug(
+            "Parsed %s drill hit(s) from %r with bounds %r",
+            len(hits),
+            path,
+            _drill_bounds(hits),
+        )
     return DrillLayer(hits, warnings)
+
+
+def _update_drill_decimal_places(line: str, drill_format: DrillFormat):
+    format_match = DRILL_FORMAT_RE.search(line)
+    if format_match:
+        drill_format.decimal_places = len(format_match.group("decimal"))
+
+
+def _drill_coordinate_to_mm(value: str, drill_format: DrillFormat) -> float:
+    if "." in value:
+        coordinate = float(value)
+    else:
+        coordinate = int(value) / 10**drill_format.decimal_places
+    return _unit_to_mm(coordinate, drill_format.unit)
+
+
+def _render_cutoff_fallback(
+    path: Path,
+    options: PreviewOptions,
+    parse_error: Exception,
+) -> RenderedLayer | None:
+    try:
+        segments = _parse_gerber_segments(path)
+    except OSError as error:
+        LOGGER.warning("Could not read cutoff fallback file %r: %s", path, error)
+        return None
+    if not segments:
+        LOGGER.debug(
+            "No cutoff fallback segments found for %r after PyGerber error %r",
+            path,
+            parse_error,
+        )
+        return None
+    bounds = _segment_bounds(segments)
+    width_px = max(math.ceil(bounds.width * options.dpmm), MIN_CANVAS_SIZE)
+    height_px = max(math.ceil(bounds.height * options.dpmm), MIN_CANVAS_SIZE)
+    image = Image.new("RGBA", (width_px, height_px), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    color = (*_layer_color(PreviewLayerKind.CUTOFF), _alpha_value(options.layer_alpha))
+    for segment in segments:
+        line_width = max(round(segment.diameter_mm * options.dpmm), 1)
+        draw.line(
+            (
+                (segment.start_x_mm - bounds.min_x) * options.dpmm,
+                (bounds.max_y - segment.start_y_mm) * options.dpmm,
+                (segment.end_x_mm - bounds.min_x) * options.dpmm,
+                (bounds.max_y - segment.end_y_mm) * options.dpmm,
+            ),
+            fill=color,
+            width=line_width,
+        )
+    LOGGER.debug(
+        "Rendered cutoff fallback for %r with %s segment(s) and bounds %r",
+        path,
+        len(segments),
+        bounds,
+    )
+    return RenderedLayer(image, PreviewLayerKind.CUTOFF, bounds)
+
+
+def _parse_gerber_segments(path: Path) -> list[GerberSegment]:
+    gerber_format = GerberFormat()
+    apertures: dict[str, float] = {}
+    active_aperture = ""
+    current_x_mm: float = None
+    current_y_mm: float = None
+    segments: list[GerberSegment] = []
+    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip().upper()
+        if not line:
+            continue
+        if line == "%MOMM*%":
+            gerber_format.unit = UNIT_MM
+            continue
+        if line == "%MOIN*%":
+            gerber_format.unit = UNIT_INCH
+            continue
+        format_match = GERBER_FORMAT_RE.match(line)
+        if format_match:
+            gerber_format.x_decimal_places = int(format_match.group("x_decimal"))
+            gerber_format.y_decimal_places = int(format_match.group("y_decimal"))
+            continue
+        aperture_match = GERBER_APERTURE_RE.match(line)
+        if aperture_match:
+            apertures[aperture_match.group("id")] = _unit_to_mm(
+                float(aperture_match.group("diameter")),
+                gerber_format.unit,
+            )
+            continue
+        d_code_match = GERBER_D_CODE_RE.match(line)
+        if d_code_match:
+            active_aperture = d_code_match.group("id")
+            continue
+        coordinate_match = GERBER_COORDINATE_RE.match(line)
+        if not coordinate_match:
+            continue
+        next_x_mm = current_x_mm
+        next_y_mm = current_y_mm
+        if coordinate_match.group("x"):
+            next_x_mm = _gerber_coordinate_to_mm(
+                coordinate_match.group("x"),
+                gerber_format.x_decimal_places,
+                gerber_format.unit,
+            )
+        if coordinate_match.group("y"):
+            next_y_mm = _gerber_coordinate_to_mm(
+                coordinate_match.group("y"),
+                gerber_format.y_decimal_places,
+                gerber_format.unit,
+            )
+        if next_x_mm is None or next_y_mm is None:
+            continue
+        if (
+            coordinate_match.group("operation") == "01"
+            and current_x_mm is not None
+            and current_y_mm is not None
+        ):
+            segments.append(
+                GerberSegment(
+                    current_x_mm,
+                    current_y_mm,
+                    next_x_mm,
+                    next_y_mm,
+                    apertures.get(active_aperture, DEFAULT_DRILL_DIAMETER_MM),
+                )
+            )
+        current_x_mm = next_x_mm
+        current_y_mm = next_y_mm
+    return segments
+
+
+def _gerber_coordinate_to_mm(value: str, decimal_places: int, unit: str) -> float:
+    coordinate = int(value) / 10**decimal_places
+    return _unit_to_mm(coordinate, unit)
+
+
+def _segment_bounds(segments: list[GerberSegment]) -> Bounds:
+    min_x = min(
+        min(segment.start_x_mm, segment.end_x_mm) - segment.diameter_mm / 2
+        for segment in segments
+    )
+    min_y = min(
+        min(segment.start_y_mm, segment.end_y_mm) - segment.diameter_mm / 2
+        for segment in segments
+    )
+    max_x = max(
+        max(segment.start_x_mm, segment.end_x_mm) + segment.diameter_mm / 2
+        for segment in segments
+    )
+    max_y = max(
+        max(segment.start_y_mm, segment.end_y_mm) + segment.diameter_mm / 2
+        for segment in segments
+    )
+    return Bounds(min_x, min_y, max_x, max_y)
 
 
 def _render_parsed_file(
@@ -363,10 +587,14 @@ def _render_parsed_file(
 
 
 def _apply_alpha(image: Image.Image, alpha_percent: int) -> Image.Image:
-    alpha = max(0, min(alpha_percent, 100)) / 100
+    alpha = _alpha_value(alpha_percent) / MAX_ALPHA
     red, green, blue, alpha_channel = image.split()
     alpha_channel = alpha_channel.point(lambda value: round(value * alpha))
     return Image.merge("RGBA", (red, green, blue, alpha_channel))
+
+
+def _alpha_value(alpha_percent: int) -> int:
+    return round(MAX_ALPHA * max(0, min(alpha_percent, 100)) / 100)
 
 
 def _tint_layer_image(image: Image.Image, color: tuple[int, int, int]) -> Image.Image:
@@ -510,6 +738,18 @@ def _compose_preview(
     if drill_layer and drill_layer.hits:
         _draw_drills(board_image, drill_layer, bounds, settings, options)
     return _tile_image(board_image, settings.tile_x, settings.tile_y)
+
+
+def _preview_canvas_size(
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+) -> tuple[int, int, int]:
+    width_px = max(math.ceil(bounds.width * options.dpmm), MIN_CANVAS_SIZE)
+    height_px = max(math.ceil(bounds.height * options.dpmm), MIN_CANVAS_SIZE)
+    tiled_width_px = width_px * settings.tile_x
+    tiled_height_px = height_px * settings.tile_y
+    return tiled_width_px, tiled_height_px, tiled_width_px * tiled_height_px
 
 
 def _draw_drills(
