@@ -17,6 +17,13 @@ class GeneralHelp:
     markdown: str
 
 
+@dataclass(frozen=True)
+class PreviewColorLegendEntry:
+    label: str
+    color: str
+    meaning: str
+
+
 SOURCE_MAN = "current pcb2gcode man page"
 SOURCE_GENERIC = "Generic wiki"
 SOURCE_COMMON = "Common wiki"
@@ -54,6 +61,50 @@ GENERAL_HELP = GeneralHelp(
         "the UI preview rules. The installed `pcb2gcode` binary remains the source of truth for "
         "generated NC files, so inspect and air-run generated G-code before cutting stock."
     ),
+)
+
+PREVIEW_HELP = GeneralHelp(
+    title="Preview Help",
+    markdown=(
+        "## Controls\n\n"
+        "- **Front / Back selector**: chooses the viewing side. Back view mirrors the composed "
+        "layout horizontally so it is easier to compare with back-side machining.\n"
+        "- **Transparency slider**: controls opacity for the active copper side and drill hits "
+        "only. Reference layers remain opaque.\n"
+        "- **Aux**: loads one preview-only Gerber reference layer. It is not saved to the "
+        "`millproject`.\n"
+        "- **NC**: reads generated NC files from the configured output directory.\n"
+        "- **Refresh**: rerenders the preview from the current files and settings.\n"
+        "- **Gerber row Front / Back / Drill / Cutoff / Aux**: show or hide Gerber, drill, "
+        "outline, and preview-only Aux layers.\n"
+        "- **NC row Front / Back / Drill / Milldrill / Outline**: choose which "
+        "loaded NC output traces are visible.\n\n"
+        "## Notes\n\n"
+        "Gerber, drill, cutoff, Aux, and G-code traces are drawn in one shared coordinate "
+        "system. Preview follows placement-related settings such as metric input, offsets, "
+        "zero-start, and tiling. G-code preview is a visual aid: it currently draws linear "
+        "`G0`/`G1` movement only, treats endpoint `Z < 0` as a cut, and keeps generated NC "
+        "files as the source of truth."
+    ),
+)
+
+PREVIEW_COLOR_LEGEND: tuple[PreviewColorLegendEntry, ...] = (
+    PreviewColorLegendEntry("Front copper", "#23DC96", "Front Gerber copper layer."),
+    PreviewColorLegendEntry("Back copper", "#E84A5F", "Back Gerber copper layer."),
+    PreviewColorLegendEntry("Drill hit fill", "#57B2FF", "Excellon drill circle fill."),
+    PreviewColorLegendEntry("Drill hit outline", "#DCF5FF", "Excellon drill circle edge."),
+    PreviewColorLegendEntry("Cutoff / outline Gerber", "#EBEEF2", "Board outline/cutoff Gerber."),
+    PreviewColorLegendEntry("Aux Gerber", "#5096FF", "Preview-only auxiliary Gerber."),
+    PreviewColorLegendEntry("Front G-code cuts", "#FFD64E", "Cutting moves from front NC output."),
+    PreviewColorLegendEntry("Back G-code cuts", "#FF6987", "Cutting moves from back NC output."),
+    PreviewColorLegendEntry("Drill G-code cuts", "#5AD2FF", "Cutting moves from drill NC output."),
+    PreviewColorLegendEntry(
+        "Milldrill G-code cuts",
+        "#96B9FF",
+        "Cutting moves from milldrill NC output.",
+    ),
+    PreviewColorLegendEntry("Outline G-code cuts", "#FFFFFF", "Cutting moves from outline NC."),
+    PreviewColorLegendEntry("Retract / travel G-code", "#AAB2B8", "Low-alpha non-cutting moves."),
 )
 
 

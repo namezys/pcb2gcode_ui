@@ -193,6 +193,37 @@ def test_open_preview_shows_dialog_and_refreshes():
     assert app.preview_image.src.startswith("data:image/png;base64,")
 
 
+def test_preview_content_uses_three_compact_control_rows():
+    app = _app()
+
+    content = app._build_preview_content()
+    first_row, second_row, third_row = content.controls[:3]
+    preview_status, preview_canvas, gcode_status = content.controls[3:6]
+    first_labels = [_button_label(control) for control in first_row.controls]
+    second_labels = [_control_label(control) for control in second_row.controls]
+    third_labels = [_control_label(control) for control in third_row.controls]
+
+    assert "Transparency" not in first_labels
+    assert "Aux" in first_labels
+    assert "NC" in first_labels
+    assert "Refresh" in first_labels
+    assert "Help" in first_labels
+    assert "Load Aux" not in first_labels
+    assert "Load NC" not in first_labels
+    assert "Regenerate" not in first_labels
+    assert second_labels == ["Gerber:", "Front", "Back", "Drill", "Cutoff", "Aux"]
+    assert third_labels == ["NC:", "Front", "Back", "Drill", "Milldrill", "Outline"]
+    assert second_row.wrap is False
+    assert third_row.wrap is False
+    assert second_row.scroll == ft.ScrollMode.AUTO
+    assert third_row.scroll == ft.ScrollMode.AUTO
+    assert all(_is_default_checkbox(control) for control in second_row.controls[1:])
+    assert all(_is_default_checkbox(control) for control in third_row.controls[1:])
+    assert preview_status is app.preview_status
+    assert preview_canvas.content is app.preview_image
+    assert gcode_status is app.gcode_status
+
+
 def test_close_preview_pops_dialog():
     page = FakePage()
     app = Pcb2GCodeApp(page)
@@ -224,6 +255,33 @@ def test_option_help_opens_matching_option_dialog():
     assert page.dialogs
     assert page.dialogs[0].title.value == OPTION_HELP_BY_KEY["mill-diameters"].title
     assert "unsafe" in page.dialogs[0].content.controls[0].value
+
+
+def test_preview_help_opens_control_and_color_legend():
+    page = FakePage()
+    app = Pcb2GCodeApp(page)
+
+    app._open_preview_help(None)
+
+    assert page.dialogs
+    assert page.dialogs[0].title.value == "Preview Help"
+    content = page.dialogs[0].content.controls
+    markdown = content[0].value
+    legend_title = content[1]
+    legend_table = content[2]
+    first_legend_row = legend_table.controls[1].content.controls
+    first_color_cell = first_legend_row[1]
+    first_color_swatch = first_color_cell.controls[0]
+
+    assert "G-code preview is a visual aid" in markdown
+    assert legend_title.value == "Color Legend"
+    assert first_legend_row[0].value == "Front copper"
+    assert first_color_swatch.bgcolor == "#23DC96"
+    assert first_color_cell.controls[1].value == "#23DC96"
+    assert any(
+        row.content.controls[0].value == "Retract / travel G-code"
+        for row in legend_table.controls
+    )
 
 
 def test_file_row_includes_help_button_without_breaking_browse_button():
@@ -282,3 +340,29 @@ def test_gcode_visibility_checkbox_controls_render_options():
 
 def _app() -> Pcb2GCodeApp:
     return Pcb2GCodeApp(FakePage())
+
+
+def _button_label(control: ft.Control) -> str:
+    content = getattr(control, "content", None)
+    return content if isinstance(content, str) else ""
+
+
+def _control_label(control: ft.Control) -> str:
+    value = getattr(control, "value", None)
+    if isinstance(value, str):
+        return value
+    label = getattr(control, "label", None)
+    if isinstance(label, str):
+        return label
+    label_value = getattr(label, "value", None)
+    return label_value if isinstance(label_value, str) else ""
+
+
+def _is_default_checkbox(control: ft.Control) -> bool:
+    return (
+        isinstance(control, ft.Checkbox)
+        and control.width is None
+        and control.height is None
+        and control.visual_density is None
+        and isinstance(control.label, str)
+    )

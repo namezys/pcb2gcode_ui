@@ -5,7 +5,14 @@ from pathlib import Path
 import flet as ft
 
 from pcb2gcode_ui.gcode_preview import GcodeTrace, gcode_trace_summary, load_gcode_trace
-from pcb2gcode_ui.help_content import GENERAL_HELP, OPTION_HELP_BY_KEY, option_help_markdown
+from pcb2gcode_ui.help_content import (
+    GENERAL_HELP,
+    OPTION_HELP_BY_KEY,
+    PREVIEW_COLOR_LEGEND,
+    PREVIEW_HELP,
+    PreviewColorLegendEntry,
+    option_help_markdown,
+)
 from pcb2gcode_ui.millproject import parse_millproject, write_millproject
 from pcb2gcode_ui.options import (
     FILE_OPTIONS,
@@ -47,6 +54,9 @@ HELP_DIALOG_WIDTH = 760
 HELP_DIALOG_HEIGHT = 520
 HELP_ICON_SIZE = 16
 HELP_BUTTON_SIZE = 32
+LEGEND_LABEL_WIDTH = 190
+LEGEND_COLOR_WIDTH = 150
+LEGEND_SWATCH_SIZE = 18
 BODY_TEXT_SIZE = 12
 SECTION_TITLE_SIZE = 15
 LABEL_TEXT_SIZE = 12
@@ -81,37 +91,31 @@ class Pcb2GCodeApp:
         self.preview_front = ft.Checkbox(
             label="Front",
             value=True,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
         self.preview_back = ft.Checkbox(
             label="Back",
             value=False,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
         self.preview_drill = ft.Checkbox(
             label="Drill",
             value=True,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
         self.preview_cutoff = ft.Checkbox(
             label="Cutoff",
             value=True,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
         self.preview_other = ft.Checkbox(
             label="Aux",
             value=True,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
         self.preview_gcode = ft.Checkbox(
             label="G-code",
             value=False,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
         self.preview_gcode_front = self._gcode_checkbox("Front")
@@ -256,50 +260,59 @@ class Pcb2GCodeApp:
                             selected=[self.preview_side],
                             on_change=self._select_preview_side,
                         ),
-                        ft.Text("Transparency", color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE),
                         self.preview_alpha,
                         ft.OutlinedButton(
-                            "Load Aux",
+                            "Aux",
                             icon=ft.Icons.LAYERS,
                             on_click=self._pick_aux_layer,
                             style=_button_style(),
                         ),
+                        ft.OutlinedButton(
+                            "NC",
+                            icon=ft.Icons.UPLOAD_FILE,
+                            on_click=self._load_gcode_outputs,
+                            style=_button_style(),
+                        ),
                         ft.FilledButton(
-                            "Regenerate",
+                            "Refresh",
                             icon=ft.Icons.REFRESH,
                             on_click=self._refresh_preview,
+                        ),
+                        ft.OutlinedButton(
+                            "Help",
+                            icon=ft.Icons.HELP_OUTLINE,
+                            on_click=self._open_preview_help,
+                            style=_button_style(),
                         ),
                     ],
                     wrap=True,
                 ),
                 ft.Row(
                     [
+                        ft.Text("Gerber:", color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE),
                         self.preview_front,
                         self.preview_back,
                         self.preview_drill,
                         self.preview_cutoff,
                         self.preview_other,
                     ],
-                    wrap=True,
+                    wrap=False,
+                    scroll=ft.ScrollMode.AUTO,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Row(
                     [
-                        ft.OutlinedButton(
-                            "Load NC",
-                            icon=ft.Icons.UPLOAD_FILE,
-                            on_click=self._load_gcode_outputs,
-                            style=_button_style(),
-                        ),
-                        self.preview_gcode,
+                        ft.Text("NC:", color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE),
                         self.preview_gcode_front,
                         self.preview_gcode_back,
                         self.preview_gcode_drill,
                         self.preview_gcode_milldrill,
                         self.preview_gcode_outline,
                     ],
-                    wrap=True,
+                    wrap=False,
+                    scroll=ft.ScrollMode.AUTO,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                self.gcode_status,
                 self.preview_status,
                 ft.Container(
                     content=self.preview_image,
@@ -308,6 +321,7 @@ class Pcb2GCodeApp:
                     border_radius=4,
                     bgcolor=PAGE_BACKGROUND_COLOR,
                 ),
+                self.gcode_status,
             ],
             spacing=8,
             scroll=ft.ScrollMode.AUTO,
@@ -514,7 +528,6 @@ class Pcb2GCodeApp:
         return ft.Checkbox(
             label=label,
             value=True,
-            label_style=ft.TextStyle(size=LABEL_TEXT_SIZE, color=TEXT_COLOR),
             on_change=self._update_preview_options,
         )
 
@@ -532,6 +545,35 @@ class Pcb2GCodeApp:
     def _open_general_help(self, _event):
         self._show_help_dialog(GENERAL_HELP.title, GENERAL_HELP.markdown)
 
+    def _open_preview_help(self, _event):
+        self.help_dialog = ft.AlertDialog(
+            modal=False,
+            title=ft.Text(PREVIEW_HELP.title, color=TEXT_COLOR, size=SECTION_TITLE_SIZE),
+            content=ft.Column(
+                [
+                    _help_markdown(PREVIEW_HELP.markdown),
+                    ft.Text("Color Legend", color=TEXT_COLOR, size=SECTION_TITLE_SIZE),
+                    _preview_color_legend_table(),
+                ],
+                width=HELP_DIALOG_WIDTH,
+                height=HELP_DIALOG_HEIGHT,
+                scroll=ft.ScrollMode.AUTO,
+                spacing=10,
+            ),
+            bgcolor=SURFACE_COLOR,
+            actions=[
+                ft.OutlinedButton(
+                    "Close",
+                    icon=ft.Icons.CLOSE,
+                    on_click=self._close_help,
+                    style=_button_style(),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(self.help_dialog)
+        self.page.update()
+
     def _open_option_help(self, _event, key: str):
         help_entry = OPTION_HELP_BY_KEY[key]
         self._show_help_dialog(help_entry.title, option_help_markdown(help_entry))
@@ -542,12 +584,7 @@ class Pcb2GCodeApp:
             title=ft.Text(title, color=TEXT_COLOR, size=SECTION_TITLE_SIZE),
             content=ft.Column(
                 [
-                    ft.Markdown(
-                        markdown,
-                        selectable=True,
-                        extension_set=ft.MarkdownExtensionSet.GITHUB_FLAVORED,
-                        auto_follow_links=True,
-                    )
+                    _help_markdown(markdown),
                 ],
                 width=HELP_DIALOG_WIDTH,
                 height=HELP_DIALOG_HEIGHT,
@@ -826,6 +863,88 @@ def run_app():
 def _border_all() -> ft.Border:
     side = ft.BorderSide(width=1, color=OUTLINE_COLOR)
     return ft.Border(left=side, top=side, right=side, bottom=side)
+
+
+def _help_markdown(markdown: str) -> ft.Markdown:
+    return ft.Markdown(
+        markdown,
+        selectable=True,
+        extension_set=ft.MarkdownExtensionSet.GITHUB_FLAVORED,
+        auto_follow_links=True,
+    )
+
+
+def _preview_color_legend_table() -> ft.Column:
+    rows: list[ft.Control] = [_preview_color_legend_header()]
+    rows.extend(_preview_color_legend_row(item) for item in PREVIEW_COLOR_LEGEND)
+    return ft.Column(rows, spacing=0)
+
+
+def _preview_color_legend_header() -> ft.Container:
+    return _preview_color_legend_container(
+        [
+            ft.Text(
+                "Layer / trace",
+                width=LEGEND_LABEL_WIDTH,
+                color=TEXT_COLOR,
+                weight=ft.FontWeight.BOLD,
+            ),
+            ft.Text(
+                "Color",
+                width=LEGEND_COLOR_WIDTH,
+                color=TEXT_COLOR,
+                weight=ft.FontWeight.BOLD,
+            ),
+            ft.Text("Meaning", expand=True, color=TEXT_COLOR, weight=ft.FontWeight.BOLD),
+        ],
+        SURFACE_COLOR,
+    )
+
+
+def _preview_color_legend_row(item: PreviewColorLegendEntry) -> ft.Container:
+    return _preview_color_legend_container(
+        [
+            ft.Text(
+                item.label,
+                width=LEGEND_LABEL_WIDTH,
+                color=TEXT_COLOR,
+                size=BODY_TEXT_SIZE,
+            ),
+            ft.Row(
+                [
+                    ft.Container(
+                        width=LEGEND_SWATCH_SIZE,
+                        height=LEGEND_SWATCH_SIZE,
+                        bgcolor=item.color,
+                        border=_border_all(),
+                        border_radius=2,
+                    ),
+                    ft.Text(item.color, color=TEXT_COLOR, size=BODY_TEXT_SIZE),
+                ],
+                width=LEGEND_COLOR_WIDTH,
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            ft.Text(item.meaning, expand=True, color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE),
+        ],
+        FIELD_BACKGROUND_COLOR,
+    )
+
+
+def _preview_color_legend_container(
+    controls: list[ft.Control],
+    bgcolor: ft.ColorValue,
+) -> ft.Container:
+    return ft.Container(
+        content=ft.Row(
+            controls,
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=8,
+        bgcolor=bgcolor,
+        border=_border_all(),
+    )
 
 
 def _tab_label(text: str) -> ft.Text:

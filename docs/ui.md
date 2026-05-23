@@ -41,10 +41,14 @@ memory at high density. The app composes the PNG with Pillow and shows it direct
 without invoking the PyGerber CLI or writing preview files.
 
 The preview window uses compact control rows. The first row has the front/back view selector,
-transparency slider, Load Aux button, and Regenerate button. The second row has horizontal
-visibility toggles for front, back, drill, cutoff/outline, and Aux. Aux is one preview-only
-Gerber file and is not saved to `millproject`. The third row loads generated NC files and toggles
-G-code movement preview by output type.
+transparency slider, Aux loader, NC loader, Refresh button, and Help button. The second row starts
+with `Gerber:` and has horizontal visibility toggles for front, back, drill, cutoff/outline, and
+Aux. Aux is one preview-only Gerber file and is not saved to `millproject`. The third row starts
+with `NC:` and toggles G-code movement preview by output type after the NC files are loaded.
+
+Preview Help opens a dialog that explains every preview control and includes a color legend table
+with real preview-color swatches for Gerber layers, drill hits, cutoff, Aux, G-code cuts, and
+retract/travel moves.
 
 All enabled layers are composed into one shared board coordinate system. Front copper is tinted
 green/cyan, back copper red/pink, cutoff light gray, Aux blue, and drill hits light blue. The
