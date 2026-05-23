@@ -85,7 +85,7 @@ class Pcb2GCodeApp:
         return ft.Container(
             content=ft.Column([ft.Text("Files", size=18, weight=ft.FontWeight.BOLD), *rows]),
             padding=10,
-            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+            border=_border_all(),
             border_radius=6,
         )
 
@@ -139,12 +139,16 @@ class Pcb2GCodeApp:
                 and spec.key != "output-dir"
             ):
                 groups.append(spec.group)
+        tab_groups = [group for group in groups if group != "Files"]
         return ft.Tabs(
-            tabs=[
-                ft.Tab(text=group, content=self._build_group(group))
-                for group in groups
-                if group != "Files"
-            ],
+            content=ft.Column(
+                [
+                    ft.TabBar(tabs=[ft.Tab(label=group) for group in tab_groups]),
+                    ft.TabBarView(controls=[self._build_group(group) for group in tab_groups]),
+                ],
+                expand=True,
+            ),
+            length=len(tab_groups),
             expand=True,
         )
 
@@ -329,3 +333,8 @@ class Pcb2GCodeApp:
 
 def run_app():
     ft.app(target=lambda page: Pcb2GCodeApp(page).build())
+
+
+def _border_all() -> ft.Border:
+    side = ft.BorderSide(width=1, color=ft.Colors.OUTLINE_VARIANT)
+    return ft.Border(left=side, top=side, right=side, bottom=side)
