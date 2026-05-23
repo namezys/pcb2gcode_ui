@@ -50,6 +50,18 @@ class FakeEvent:
 
 
 @dataclass
+class FakeOffset:
+    x: float
+    y: float
+
+
+@dataclass
+class FakeDragEvent:
+    local_delta: FakeOffset
+    global_delta: FakeOffset = None
+
+
+@dataclass
 class FakeSegmentedControl:
     selected: list[PreviewSide]
 
@@ -277,17 +289,36 @@ def test_preview_content_uses_three_compact_control_rows():
     assert all(_is_default_checkbox(control) for control in second_row.controls[1:])
     assert all(_is_default_checkbox(control) for control in third_row.controls[1:])
     assert preview_status is app.preview_status
-    interactive_viewer = preview_canvas.content.controls[0]
-    assert isinstance(interactive_viewer, ft.InteractiveViewer)
-    assert interactive_viewer.content is app.preview_image
-    assert interactive_viewer.pan_enabled is True
-    assert interactive_viewer.scale_enabled is True
-    assert interactive_viewer.trackpad_scroll_causes_scale is True
-    assert interactive_viewer.min_scale == 0.5
-    assert interactive_viewer.max_scale == 8.0
-    assert interactive_viewer.constrained is False
-    assert preview_canvas.content.controls[1] is app.gcode_instrument_overlay
+    preview_viewport = preview_canvas.content.controls[0]
+    assert isinstance(preview_viewport, ft.InteractiveViewer)
+    assert preview_viewport.content is app.preview_image
+    assert preview_viewport.pan_enabled is True
+    assert preview_viewport.scale_enabled is True
+    assert preview_viewport.trackpad_scroll_causes_scale is True
+    assert preview_viewport.min_scale == 0.5
+    assert preview_viewport.max_scale == 8.0
+    assert preview_viewport.constrained is False
+    assert preview_viewport.boundary_margin == 1000
+    assert preview_viewport.clip_behavior == ft.ClipBehavior.HARD_EDGE
+    assert preview_canvas.content.controls[1] is app.gcode_instrument_overlay_drag
     assert gcode_status is app.gcode_status
+
+
+def test_gcode_table_drag_moves_table_without_changing_preview_image():
+    app = _app()
+    preview_left = app.preview_image.left
+    preview_top = app.preview_image.top
+    preview_width = app.preview_image.width
+    preview_height = app.preview_image.height
+
+    app._pan_gcode_instrument_overlay(FakeDragEvent(FakeOffset(-20, 30)))
+
+    assert app.gcode_instrument_overlay_drag.left == 560
+    assert app.gcode_instrument_overlay_drag.top == 40
+    assert app.preview_image.left == preview_left
+    assert app.preview_image.top == preview_top
+    assert app.preview_image.width == preview_width
+    assert app.preview_image.height == preview_height
 
 
 def test_close_preview_pops_dialog():

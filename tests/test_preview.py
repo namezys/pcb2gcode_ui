@@ -466,7 +466,8 @@ def test_compose_preview_draws_retract_as_dots():
     )
 
     assert image.getpixel((0, 50))[:3] != (32, 35, 38)
-    assert image.getpixel((2, 50))[:3] == (32, 35, 38)
+    assert image.getpixel((2, 50))[:3] != (32, 35, 38)
+    assert image.getpixel((5, 50))[:3] != (32, 35, 38)
 
 
 def test_compose_preview_back_side_mirrors_gcode_horizontally():

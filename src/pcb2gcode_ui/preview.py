@@ -49,7 +49,9 @@ GERBER_COORDINATE_RE = re.compile(
 UNIT_MM = "mm"
 UNIT_INCH = "inch"
 GCODE_CUT_ALPHA = 235
-GCODE_RETRACT_ALPHA = 115
+GCODE_RETRACT_ALPHA = 175
+GCODE_RETRACT_WIDTH_MM = 0.05
+GCODE_RETRACT_GAP_MM = 0.18
 
 
 class PreviewSide(StrEnum):
@@ -915,8 +917,8 @@ def _draw_gcode_trace(
                 start,
                 end,
                 fill=(color[0], color[1], color[2], GCODE_RETRACT_ALPHA),
-                width=max(round(options.dpmm * 0.04), 1),
-                gap_px=max(round(options.dpmm * 0.35), 3),
+                width=max(round(options.dpmm * GCODE_RETRACT_WIDTH_MM), 1),
+                gap_px=max(round(options.dpmm * GCODE_RETRACT_GAP_MM), 2),
             )
 
 

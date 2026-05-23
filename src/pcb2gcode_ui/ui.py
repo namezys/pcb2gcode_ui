@@ -55,6 +55,9 @@ PREVIEW_DIALOG_WIDTH = 960
 PREVIEW_DIALOG_HEIGHT = 680
 PREVIEW_IMAGE_WIDTH = 920
 PREVIEW_IMAGE_HEIGHT = 520
+PREVIEW_MIN_ZOOM = 0.5
+PREVIEW_MAX_ZOOM = 8.0
+PREVIEW_BOUNDARY_MARGIN = 1000
 PREVIEW_ALPHA_SLIDER_WIDTH = 170
 HELP_DIALOG_WIDTH = 760
 HELP_DIALOG_HEIGHT = 520
@@ -64,6 +67,7 @@ LEGEND_LABEL_WIDTH = 190
 LEGEND_COLOR_WIDTH = 150
 LEGEND_SWATCH_SIZE = 18
 INSTRUMENT_OVERLAY_WIDTH = 330
+INSTRUMENT_OVERLAY_MARGIN = 10
 BODY_TEXT_SIZE = 12
 SMALL_TEXT_SIZE = 11
 SECTION_TITLE_SIZE = 15
@@ -161,16 +165,39 @@ class Pcb2GCodeApp:
             width=PREVIEW_IMAGE_WIDTH,
             height=PREVIEW_IMAGE_HEIGHT,
         )
+        self.preview_viewport = ft.InteractiveViewer(
+            self.preview_image,
+            width=PREVIEW_IMAGE_WIDTH,
+            height=PREVIEW_IMAGE_HEIGHT,
+            pan_enabled=True,
+            scale_enabled=True,
+            trackpad_scroll_causes_scale=True,
+            min_scale=PREVIEW_MIN_ZOOM,
+            max_scale=PREVIEW_MAX_ZOOM,
+            constrained=False,
+            boundary_margin=PREVIEW_BOUNDARY_MARGIN,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+        )
         self.gcode_instrument_overlay = ft.Container(
             visible=False,
-            right=10,
-            top=10,
             width=INSTRUMENT_OVERLAY_WIDTH,
             padding=8,
             bgcolor=SURFACE_COLOR,
             border=_border_all(),
             border_radius=4,
         )
+        self.gcode_instrument_left = (
+            PREVIEW_IMAGE_WIDTH - INSTRUMENT_OVERLAY_WIDTH - INSTRUMENT_OVERLAY_MARGIN
+        )
+        self.gcode_instrument_top = INSTRUMENT_OVERLAY_MARGIN
+        self.gcode_instrument_overlay_drag = ft.GestureDetector(
+            content=self.gcode_instrument_overlay,
+            left=self.gcode_instrument_left,
+            top=self.gcode_instrument_top,
+            mouse_cursor=ft.MouseCursor.MOVE,
+            on_pan_update=self._pan_gcode_instrument_overlay,
+        )
+        self._apply_gcode_instrument_overlay_position()
         self.preview_dialog: ft.AlertDialog = None
         self.help_dialog: ft.AlertDialog = None
         self.status_text = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
@@ -337,22 +364,12 @@ class Pcb2GCodeApp:
                 ft.Container(
                     content=ft.Stack(
                         [
-                            ft.InteractiveViewer(
-                                self.preview_image,
-                                pan_enabled=True,
-                                scale_enabled=True,
-                                trackpad_scroll_causes_scale=True,
-                                min_scale=0.5,
-                                max_scale=8.0,
-                                constrained=False,
-                                clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                                width=PREVIEW_IMAGE_WIDTH,
-                                height=PREVIEW_IMAGE_HEIGHT,
-                            ),
-                            self.gcode_instrument_overlay,
+                            self.preview_viewport,
+                            self.gcode_instrument_overlay_drag,
                         ],
                         width=PREVIEW_IMAGE_WIDTH,
                         height=PREVIEW_IMAGE_HEIGHT,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE,
                     ),
                     padding=8,
                     border=_border_all(),
@@ -865,6 +882,26 @@ class Pcb2GCodeApp:
             previous_source_label = tool_path.source_label
         self.gcode_instrument_overlay.content = ft.Column(rows, spacing=4)
         self.gcode_instrument_overlay.visible = True
+        self._apply_gcode_instrument_overlay_position()
+
+    def _pan_gcode_instrument_overlay(self, event):
+        delta = getattr(event, "local_delta", None) or getattr(event, "global_delta", None)
+        self.gcode_instrument_left = _clamp(
+            self.gcode_instrument_left + _offset_x(delta),
+            0,
+            PREVIEW_IMAGE_WIDTH - INSTRUMENT_OVERLAY_WIDTH,
+        )
+        self.gcode_instrument_top = _clamp(
+            self.gcode_instrument_top + _offset_y(delta),
+            0,
+            PREVIEW_IMAGE_HEIGHT - INSTRUMENT_OVERLAY_MARGIN,
+        )
+        self._apply_gcode_instrument_overlay_position()
+        self.page.update()
+
+    def _apply_gcode_instrument_overlay_position(self):
+        self.gcode_instrument_overlay_drag.left = self.gcode_instrument_left
+        self.gcode_instrument_overlay_drag.top = self.gcode_instrument_top
 
     def _selected_gcode_sources(self) -> set[str]:
         selected: set[str] = set()
@@ -1090,6 +1127,18 @@ def _small_table_text(value: str, width: int, color: ft.ColorValue) -> ft.Text:
         max_lines=1,
         overflow=ft.TextOverflow.ELLIPSIS,
     )
+
+
+def _offset_x(offset) -> float:
+    return float(getattr(offset, "x", 0) or 0)
+
+
+def _offset_y(offset) -> float:
+    return float(getattr(offset, "y", 0) or 0)
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(value, maximum))
 
 
 def _tab_label(text: str) -> ft.Text:
