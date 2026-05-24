@@ -754,6 +754,7 @@ def transformed_gcode_cutoff_bounds_summary(
             settings,
             options,
             mirror_back_source=True,
+            apply_alignment_offset=False,
         ),
     )
 
@@ -799,6 +800,7 @@ def _transformed_bounds(
                 settings,
                 preview_options,
                 mirror_back_source=True,
+                apply_alignment_offset=False,
             )
             for segment in gcode_trace.segments
             for point in (segment.start, segment.end)
@@ -865,11 +867,13 @@ def _transform_point(
     x_value: float,
     y_value: float,
     settings: TransformSettings,
+    apply_alignment_offset: bool = True,
 ) -> tuple[float, float]:
     x_base = x_value - (settings.board_bounds.min_x if settings.zero_start else 0)
     y_base = y_value - (settings.board_bounds.min_y if settings.zero_start else 0)
-    x_base += settings.x_offset_mm
-    y_base += settings.y_offset_mm
+    if apply_alignment_offset:
+        x_base += settings.x_offset_mm
+        y_base += settings.y_offset_mm
     return x_base, y_base
 
 
@@ -880,6 +884,7 @@ def _transform_layout_point(
     settings: TransformSettings,
     options: PreviewOptions,
     mirror_back_source: bool = False,
+    apply_alignment_offset: bool = True,
 ) -> tuple[float, float]:
     x_base = x_value
     y_base = y_value
@@ -890,7 +895,7 @@ def _transform_layout_point(
             x_base = -x_base
     if options.side == PreviewSide.BACK:
         x_base = -x_base
-    return _transform_point(x_base, y_base, settings)
+    return _transform_point(x_base, y_base, settings, apply_alignment_offset)
 
 
 def _is_back_gcode_source(kind: str, settings: TransformSettings) -> bool:
@@ -1139,6 +1144,7 @@ def _mirror_line_bounds(
         PreviewLayerKind.FRONT,
         settings,
         options,
+        apply_alignment_offset=False,
     )
     if settings.mirror_yaxis:
         return Bounds(bounds.min_x, axis_y, bounds.max_x, axis_y)
@@ -1184,6 +1190,7 @@ def _preview_mirror_line_points(
         PreviewLayerKind.FRONT,
         settings,
         options,
+        apply_alignment_offset=False,
     )
     image_width, image_height = image_size
     if settings.mirror_yaxis:
@@ -1312,6 +1319,7 @@ def _preview_point(
         settings,
         options,
         mirror_back_source=True,
+        apply_alignment_offset=False,
     )
     return (
         (transformed_x - bounds.min_x) * options.dpmm,
@@ -1332,6 +1340,7 @@ def _transform_gcode_point(
         settings,
         PreviewOptions(),
         mirror_back_source=True,
+        apply_alignment_offset=False,
     )
 
 
@@ -1426,6 +1435,7 @@ def _transformed_gcode_axis_points(
             settings,
             preview_options,
             mirror_back_source=True,
+            apply_alignment_offset=False,
         )
         for x_value, y_value in _raw_gcode_axis_points(axis_length)
     )

@@ -880,8 +880,8 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "X offset",
         "length, default `0`",
         "Applies global X translation.",
-        "Global X offset. Coordinate-origin choices can affect alignment across front, back, "
-        "drill, and outline files.",
+        "Global X offset for source artwork in preview and generation. Loaded NC preview files "
+        "stay in their already-generated coordinates.",
         (SOURCE_ALIGNMENT, SOURCE_DETAIL_HELP),
     ),
     "y-offset": _entry(
@@ -889,8 +889,8 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "Y offset",
         "length, default `0`",
         "Applies global Y translation.",
-        "Global Y offset. Coordinate-origin choices can affect alignment across front, back, "
-        "drill, and outline files.",
+        "Global Y offset for source artwork in preview and generation. Loaded NC preview files "
+        "stay in their already-generated coordinates.",
         (SOURCE_ALIGNMENT, SOURCE_DETAIL_HELP),
     ),
     "zero-start": _entry(

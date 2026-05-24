@@ -1480,6 +1480,89 @@ def test_transform_settings_uses_y_mirror_for_back_side_drill_and_outline_gcode(
     assert _transform_gcode_point(2, 5, "milldrill", settings) == (2, -5)
 
 
+def test_transform_gcode_point_ignores_alignment_offset():
+    settings = _preview_settings(
+        Bounds(0, 0, 10, 10),
+        x_offset_mm=10,
+        y_offset_mm=20,
+    )
+
+    assert _transform_gcode_point(2, 5, "front", settings) == (2, 5)
+
+
+def test_transformed_bounds_apply_alignment_offset_to_design_sources():
+    layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    drill_layer = DrillLayer([DrillHit(2, 2, 1)], [])
+    settings = _preview_settings(
+        Bounds(0, 0, 2, 2),
+        x_offset_mm=10,
+        y_offset_mm=-5,
+    )
+
+    bounds = _transformed_bounds([layer], drill_layer, settings)
+
+    assert bounds == Bounds(8, -7, 14, -1)
+
+
+def test_transformed_bounds_do_not_apply_alignment_offset_to_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(1, 1, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(
+        Bounds(0, 0, 1, 1),
+        x_offset_mm=10,
+        y_offset_mm=20,
+    )
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds == Bounds(-2, -2, 6, 6)
+
+
+def test_transformed_bounds_keep_gerber_offset_relative_to_gcode():
+    layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(1, 1, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(
+        Bounds(0, 0, 1, 1),
+        x_offset_mm=10,
+        y_offset_mm=0,
+    )
+
+    bounds = _transformed_bounds([layer], None, settings, trace)
+
+    assert bounds == Bounds(-2, -2, 13, 6)
+
+
 def test_transformed_bounds_include_cut_side_back_outline_gcode():
     trace = GcodeTrace(
         [
@@ -1981,13 +2064,15 @@ def _preview_settings(
     mirror_yaxis: bool = False,
     mirror_axis_mm: float = 0,
     back_gcode_source_kinds: tuple[str, ...] = ("back",),
+    x_offset_mm: float = 0,
+    y_offset_mm: float = 0,
 ) -> TransformSettings:
     return TransformSettings(
         metric=True,
         zero_start=False,
         mirror_yaxis=mirror_yaxis,
-        x_offset_mm=0,
-        y_offset_mm=0,
+        x_offset_mm=x_offset_mm,
+        y_offset_mm=y_offset_mm,
         tile_x=1,
         tile_y=1,
         board_bounds=bounds,

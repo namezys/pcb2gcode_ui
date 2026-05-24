@@ -60,9 +60,11 @@ The transparency slider applies only to the active copper side and drill hits: f
 in front view, back plus drill in back view. The inactive copper side, cutoff, and Aux stay fully
 opaque so reference geometry remains readable.
 
-Preview transforms follow the pcb2gcode options that affect placement: `metric`, `x-offset`,
-`y-offset`, `zero-start`, `tile-x`, and `tile-y`. Mirror-related pcb2gcode generation options are
-not applied directly; the back preview side uses its own horizontal view mirror.
+Preview transforms follow the pcb2gcode options that affect input-source placement: `metric`,
+`x-offset`, `y-offset`, `zero-start`, `tile-x`, and `tile-y`. The alignment offsets move Gerber,
+drill, cutoff, and Aux source artwork against generated NC output; loaded NC files stay in their
+already-generated coordinates. Mirror-related pcb2gcode generation options are not applied
+directly; the back preview side uses its own horizontal view mirror.
 
 Drill rendering uses a narrow preview-only Excellon reader for common decimal and implied-decimal
 `METRIC`/`INCH` files with `TnnCdiameter` tools and `X...Y...` hits. Cutoff rendering first uses
