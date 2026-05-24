@@ -18,7 +18,7 @@ from pcb2gcode_ui.help_content import OPTION_HELP_BY_KEY
 from pcb2gcode_ui.millproject import parse_millproject
 from pcb2gcode_ui.options import SPEC_BY_KEY
 from pcb2gcode_ui.postprocess import PostProcessResult
-from pcb2gcode_ui.preprocess import PreProcessResult
+from pcb2gcode_ui.preprocess import AlignDrillsPlan, PreProcessResult
 from pcb2gcode_ui.preview import PreviewResult, PreviewSide
 from pcb2gcode_ui.runner import CommandResult
 from pcb2gcode_ui.ui import MUTED_TEXT_COLOR, STALE_TEXT_COLOR, Pcb2GCodeApp
@@ -492,19 +492,29 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
     app.values["zsafe"] = "5"
     app.values["zchange"] = "10"
     app.values["drill"] = str(tmp_path / "drill.drl")
+    app.values["outline"] = str(tmp_path / "outline.gbr")
     app.values["zdrill"] = "-1"
     app.values["drill-feed"] = "100"
     app.values["drill-speed"] = "1000"
+    app.values["zcut"] = "-1"
+    app.values["cutter-diameter"] = "1"
+    app.values["cut-feed"] = "100"
+    app.values["cut-speed"] = "1000"
+    app.values["cut-infeed"] = "0.5"
     app.values["output-dir"] = str(tmp_path / "nc")
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
     calls: list[dict[str, str]] = []
+    generate_calls: list[dict[str, str]] = []
 
-    def fake_pre_process(values, base_dir, output_dir):
+    def fake_pre_process(values, base_dir, output_dir, align_plan):
         calls.append(
             {
                 "drill": values["drill"],
                 "output_dir": str(output_dir),
+                "x_offset": values["x-offset"],
+                "y_offset": values["y-offset"],
+                "holes": str(align_plan.holes),
             }
         )
         command_values = dict(values)
@@ -513,19 +523,40 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
 
     def fake_validate(values, base_dir):
         assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        assert values["x-offset"] == "-20mm"
+        assert values["y-offset"] == "-30mm"
         return CommandResult(["validate"], 0, "valid")
 
     def fake_generate(values, base_dir):
-        assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        generate_calls.append(dict(values))
         return CommandResult(["generate"], 0, "generated")
 
     monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
     monkeypatch.setattr("pcb2gcode_ui.ui.validate_with_binary", fake_validate)
     monkeypatch.setattr("pcb2gcode_ui.ui.generate_nc_files", fake_generate)
+    monkeypatch.setattr(
+        Pcb2GCodeApp,
+        "_build_align_drills_plan",
+        lambda _app, _values: AlignDrillsPlan("-20mm", "-30mm", ((20, 19.5), (20, 40.5))),
+    )
 
     app._generate(None)
 
-    assert calls == [{"drill": str(tmp_path / "drill.drl"), "output_dir": str(tmp_path / "nc")}]
+    assert generate_calls[0]["drill"] == str(tmp_path / "drill.drl")
+    assert generate_calls[0]["output-dir"] == str(tmp_path / "nc" / "pcb2gcode-ui-preprocess")
+    assert generate_calls[1]["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+    assert generate_calls[1]["output-dir"] == str(tmp_path / "nc")
+    assert calls == [
+        {
+            "drill": str(tmp_path / "drill.drl"),
+            "output_dir": str(tmp_path / "nc"),
+            "x_offset": "-20mm",
+            "y_offset": "-30mm",
+            "holes": "((20, 19.5), (20, 40.5))",
+        }
+    ]
+    assert app.values["x-offset"] == "-20mm"
+    assert app.values["y-offset"] == "-30mm"
     assert "Pre-process: wrote 1 file(s): drill.pcb2gcode-ui-align-drills.drl." in (
         app.command_output.value
     )
@@ -537,15 +568,30 @@ def test_pre_process_failure_does_not_mark_generated_current(monkeypatch, tmp_pa
     app.values["zsafe"] = "5"
     app.values["zchange"] = "10"
     app.values["drill"] = str(tmp_path / "drill.drl")
+    app.values["outline"] = str(tmp_path / "outline.gbr")
     app.values["zdrill"] = "-1"
     app.values["drill-feed"] = "100"
     app.values["drill-speed"] = "1000"
+    app.values["zcut"] = "-1"
+    app.values["cutter-diameter"] = "1"
+    app.values["cut-feed"] = "100"
+    app.values["cut-speed"] = "1000"
+    app.values["cut-infeed"] = "0.5"
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
 
-    def fake_pre_process(_values, _base_dir, _output_dir):
+    def fake_pre_process(_values, _base_dir, _output_dir, _align_plan):
         raise OSError("cannot write")
 
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+    monkeypatch.setattr(
+        Pcb2GCodeApp,
+        "_build_align_drills_plan",
+        lambda _app, _values: AlignDrillsPlan("-20mm", "-30mm", ((20, 19.5), (20, 40.5))),
+    )
     monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
 
     app._generate(None)
@@ -555,7 +601,39 @@ def test_pre_process_failure_does_not_mark_generated_current(monkeypatch, tmp_pa
     assert app.generation_status.value == "NC: not generated for current session."
 
 
-def test_validate_uses_temporary_pre_process_output(monkeypatch, tmp_path: Path):
+def test_pre_process_first_generation_failure_stops_final_generation(monkeypatch, tmp_path: Path):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["drill"] = str(tmp_path / "drill.drl")
+    app.values["outline"] = str(tmp_path / "outline.gbr")
+    app.values["zdrill"] = "-1"
+    app.values["drill-feed"] = "100"
+    app.values["drill-speed"] = "1000"
+    app.values["zcut"] = "-1"
+    app.values["cutter-diameter"] = "1"
+    app.values["cut-feed"] = "100"
+    app.values["cut-speed"] = "1000"
+    app.values["cut-infeed"] = "0.5"
+    app.values["pre-align-drills"] = "true"
+    app.values["pre-align-drill-diameter"] = "0.5mm"
+
+    def fake_pre_process(_values, _base_dir, _output_dir, _align_plan):
+        raise AssertionError("final preprocess should not run")
+
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 1, "first failed"),
+    )
+    monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
+
+    app._generate(None)
+
+    assert app.generated_values_snapshot is None
+    assert "first failed" in app.command_output.value
+
+
+def test_validation_does_not_run_pre_process(monkeypatch, tmp_path: Path):
     app = _app()
     app.values["zsafe"] = "5"
     app.values["zchange"] = "10"
@@ -565,28 +643,20 @@ def test_validate_uses_temporary_pre_process_output(monkeypatch, tmp_path: Path)
     app.values["drill-speed"] = "1000"
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
-    output_dirs: list[Path] = []
-
-    def fake_pre_process(values, base_dir, output_dir):
-        output_dirs.append(output_dir)
-        command_values = dict(values)
-        command_values["drill"] = str(output_dir / "drill.pcb2gcode-ui-align-drills.drl")
-        return PreProcessResult(command_values, 1, (Path(command_values["drill"]),))
 
     def fake_validate(values, base_dir):
-        assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        assert values["drill"] == str(tmp_path / "drill.drl")
         return CommandResult(["validate"], 0, "valid")
+
+    def fake_pre_process(_values, _base_dir, _output_dir, _align_plan):
+        raise AssertionError("validate should not pre-process")
 
     monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
     monkeypatch.setattr("pcb2gcode_ui.ui.validate_with_binary", fake_validate)
 
     app._validate(None)
 
-    assert output_dirs
-    assert output_dirs[0].name.startswith("pcb2gcode-ui-preprocess-")
-    assert "Pre-process: wrote 1 file(s): drill.pcb2gcode-ui-align-drills.drl." in (
-        app.command_output.value
-    )
+    assert app.command_output.value.startswith("OK")
 
 
 def test_post_process_failure_does_not_mark_generated_current(monkeypatch):

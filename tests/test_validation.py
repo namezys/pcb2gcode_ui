@@ -29,11 +29,17 @@ def test_validate_values_requires_align_drill_diameter_when_enabled_with_drill()
     messages = validate_values(
         {
             "drill": "drill.drl",
+            "outline": "outline.gbr",
             "zsafe": "5",
             "zchange": "10",
             "zdrill": "-1",
             "drill-feed": "100",
             "drill-speed": "1000",
+            "zcut": "-1",
+            "cutter-diameter": "1",
+            "cut-feed": "100",
+            "cut-speed": "1000",
+            "cut-infeed": "0.5",
             "pre-align-drills": "true",
         }
     )
@@ -45,11 +51,17 @@ def test_validate_values_rejects_non_positive_align_drill_diameter():
     messages = validate_values(
         {
             "drill": "drill.drl",
+            "outline": "outline.gbr",
             "zsafe": "5",
             "zchange": "10",
             "zdrill": "-1",
             "drill-feed": "100",
             "drill-speed": "1000",
+            "zcut": "-1",
+            "cutter-diameter": "1",
+            "cut-feed": "100",
+            "cut-speed": "1000",
+            "cut-infeed": "0.5",
             "pre-align-drills": "true",
             "pre-align-drill-diameter": "0",
         }

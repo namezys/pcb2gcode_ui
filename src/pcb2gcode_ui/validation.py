@@ -86,7 +86,11 @@ def _validate_cross_fields(values: dict[str, str], messages: list[ValidationMess
         value = values.get(key, "").strip()
         if value and value.isdigit() and int(value) < 1:
             messages.append(ValidationMessage(key, "Value must be at least 1."))
-    if _enabled(values, PRE_ALIGN_DRILLS_KEY) and values.get("drill", "").strip():
+    if (
+        _enabled(values, PRE_ALIGN_DRILLS_KEY)
+        and values.get("drill", "").strip()
+        and values.get("outline", "").strip()
+    ):
         diameter = values.get(PRE_ALIGN_DRILL_DIAMETER_KEY, "").strip()
         if not diameter:
             messages.append(

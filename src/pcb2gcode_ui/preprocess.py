@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from pcb2gcode_ui.gcode_preview import GcodeBounds
 from pcb2gcode_ui.options import bool_value
 
 LOGGER = logging.getLogger(__name__)
@@ -31,34 +32,140 @@ class PreProcessResult:
         return f"Pre-process: wrote {self.processed_files} file(s): {files}."
 
 
+@dataclass(frozen=True)
+class AlignDrillsPlan:
+    x_offset: str
+    y_offset: str
+    holes: tuple[tuple[float, float], ...]
+
+
 def pre_process_input_files(
     values: dict[str, str],
     base_dir: Path,
     output_dir: Path,
+    align_drills_plan: AlignDrillsPlan = None,
 ) -> PreProcessResult:
     command_values = dict(values)
-    if not _enabled(values, PRE_ALIGN_DRILLS_KEY) or not values.get("drill", "").strip():
+    if (
+        not _enabled(values, PRE_ALIGN_DRILLS_KEY)
+        or not values.get("drill", "").strip()
+        or not values.get("outline", "").strip()
+        or not align_drills_plan
+    ):
         return PreProcessResult(command_values, 0, ())
 
     source_path = _resolve_path(values["drill"], base_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = _processed_drill_path(source_path, output_dir)
     content = source_path.read_text(encoding="utf-8", errors="ignore")
-    processed_content = _add_alignment_drill(content, values)
+    processed_content = _add_alignment_drills(content, values, align_drills_plan.holes)
     output_path.write_text(processed_content, encoding="utf-8")
     command_values["drill"] = str(output_path)
+    command_values["x-offset"] = align_drills_plan.x_offset
+    command_values["y-offset"] = align_drills_plan.y_offset
     LOGGER.debug("Pre-processed drill file %r into %r", source_path, output_path)
     return PreProcessResult(command_values, 1, (output_path,))
 
 
-def _add_alignment_drill(content: str, values: dict[str, str]) -> str:
+def align_drills_plan(values: dict[str, str], cutoff_bounds: GcodeBounds) -> AlignDrillsPlan:
+    metric = _enabled(values, "metric")
+    front_bounds = _front_side_cutoff_bounds(values, cutoff_bounds)
+    center_x = (front_bounds.min_x + front_bounds.max_x) / 2
+    center_y = (front_bounds.min_y + front_bounds.max_y) / 2
+    x_offset = -center_x
+    y_offset = -center_y
+    diameter = _diameter_to_mm(values[PRE_ALIGN_DRILL_DIAMETER_KEY], metric)
+    if _enabled(values, "mirror-yaxis"):
+        mirror_line = "horizontal Y=0"
+        holes = (
+            (front_bounds.min_x - diameter, center_y),
+            (front_bounds.max_x + diameter, center_y),
+        )
+    else:
+        mirror_line = "vertical X=0"
+        holes = (
+            (center_x, front_bounds.min_y - diameter),
+            (center_x, front_bounds.max_y + diameter),
+        )
+    plan = AlignDrillsPlan(
+        x_offset=f"{_format_decimal(x_offset)}mm",
+        y_offset=f"{_format_decimal(y_offset)}mm",
+        holes=holes,
+    )
+    LOGGER.debug(
+        "Align-drills cutoff bounds: min=(%s, %s), max=(%s, %s), size=(%s, %s)",
+        cutoff_bounds.min_x,
+        cutoff_bounds.min_y,
+        cutoff_bounds.max_x,
+        cutoff_bounds.max_y,
+        cutoff_bounds.width,
+        cutoff_bounds.height,
+    )
+    LOGGER.debug(
+        "Align-drills front-side cutoff bounds: min=(%s, %s), max=(%s, %s), size=(%s, %s)",
+        front_bounds.min_x,
+        front_bounds.min_y,
+        front_bounds.max_x,
+        front_bounds.max_y,
+        front_bounds.width,
+        front_bounds.height,
+    )
+    LOGGER.debug("Align-drills mirror line: %s", mirror_line)
+    LOGGER.debug(
+        "Align-drills calculated offsets: x-offset=%s, y-offset=%s",
+        plan.x_offset,
+        plan.y_offset,
+    )
+    for idx, hole in enumerate(plan.holes, start=1):
+        LOGGER.debug("Align-drills drill point #%s: x=%s, y=%s", idx, hole[0], hole[1])
+    return plan
+
+
+def _front_side_cutoff_bounds(values: dict[str, str], cutoff_bounds: GcodeBounds) -> GcodeBounds:
+    if values.get("cut-side", "").strip().lower() != "back":
+        return cutoff_bounds
+    points = [
+        _front_side_cutoff_point(values, cutoff_bounds.min_x, cutoff_bounds.min_y),
+        _front_side_cutoff_point(values, cutoff_bounds.min_x, cutoff_bounds.max_y),
+        _front_side_cutoff_point(values, cutoff_bounds.max_x, cutoff_bounds.min_y),
+        _front_side_cutoff_point(values, cutoff_bounds.max_x, cutoff_bounds.max_y),
+    ]
+    return GcodeBounds(
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
+    )
+
+
+def _front_side_cutoff_point(
+    values: dict[str, str],
+    x_value: float,
+    y_value: float,
+) -> tuple[float, float]:
+    if _enabled(values, "mirror-yaxis"):
+        return x_value, -y_value
+    return -x_value, y_value
+
+
+def _add_alignment_drills(
+    content: str,
+    values: dict[str, str],
+    holes: tuple[tuple[float, float], ...],
+) -> str:
     had_trailing_newline = content.endswith("\n")
     lines = content.splitlines()
     unit = _drill_unit(lines)
-    diameter = _format_decimal(_diameter_for_unit(values, unit))
+    diameter = _format_tool_diameter(_diameter_for_unit(values, unit))
     tool_id = _free_tool_id(lines)
     tool_definition = f"T{tool_id}C{diameter}"
-    drill_commands = [f"T{tool_id}", "X0Y0"]
+    drill_commands = [
+        f"T{tool_id}",
+        *[
+            _format_drill_hit(x_value, y_value, values, unit)
+            for x_value, y_value in holes
+        ],
+    ]
     updated_lines = _insert_tool_definition(lines, tool_definition)
     updated_lines = _insert_drill_commands(updated_lines, drill_commands)
     processed_content = "\n".join(updated_lines)
@@ -97,6 +204,23 @@ def _diameter_to_mm(value: str, metric_input: bool) -> float:
     if metric_input:
         return diameter
     return diameter * INCH_TO_MM
+
+
+def _coordinate_for_unit(value_mm: float, unit: str) -> float:
+    if unit == UNIT_INCH:
+        return value_mm / INCH_TO_MM
+    return value_mm
+
+
+def _format_drill_hit(
+    x_value: float,
+    y_value: float,
+    values: dict[str, str],
+    unit: str,
+) -> str:
+    x_drill = _coordinate_for_unit(x_value, unit)
+    y_drill = _coordinate_for_unit(y_value, unit)
+    return f"X{_format_decimal(x_drill)}Y{_format_decimal(y_drill)}"
 
 
 def _free_tool_id(lines: list[str]) -> str:
@@ -148,6 +272,10 @@ def _insert_drill_commands(lines: list[str], drill_commands: list[str]) -> list[
 def _format_decimal(value: float) -> str:
     formatted = f"{value:.6f}".rstrip("0").rstrip(".")
     return formatted or "0"
+
+
+def _format_tool_diameter(value: float) -> str:
+    return f"{value:.3f}"
 
 
 def _processed_drill_path(source_path: Path, output_dir: Path) -> Path:

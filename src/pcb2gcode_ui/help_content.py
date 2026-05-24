@@ -227,7 +227,8 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "Writes a generated drill input copy before pcb2gcode runs.",
         "UI-only pre-processing step. When enabled, the original Excellon drill file stays "
         "unchanged. The UI writes a clearly named processed drill file into the output "
-        "directory, adds a free tool, and adds one drill hit at `(0, 0)` for alignment.",
+        "directory, adds a free tool, and adds two drill hits outside the generated cutoff "
+        "bounds on the computed mirror line. This requires an outline/cutoff file.",
         (SOURCE_LOCAL_UI,),
     ),
     "pre-align-drill-diameter": _entry(

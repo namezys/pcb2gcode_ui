@@ -1,17 +1,19 @@
 import base64
 from functools import partial
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import flet as ft
 
 from pcb2gcode_ui.app_state import AppSettings, load_app_settings, save_app_settings
 from pcb2gcode_ui.gcode_preview import (
+    GcodeInterpreter,
     GcodeToolPath,
     GcodeTrace,
+    gcode_cutoff_bounds,
     gcode_instrument_color,
     gcode_tool_parameters_label,
     gcode_trace_summary,
+    generated_output_paths,
     load_gcode_trace,
 )
 from pcb2gcode_ui.help_content import (
@@ -39,7 +41,9 @@ from pcb2gcode_ui.options import (
 from pcb2gcode_ui.postprocess import POST_REMOVE_T_KEY, post_process_generated_files
 from pcb2gcode_ui.preprocess import (
     PRE_ALIGN_DRILLS_KEY,
+    AlignDrillsPlan,
     PreProcessResult,
+    align_drills_plan,
     pre_process_input_files,
 )
 from pcb2gcode_ui.preview import (
@@ -83,6 +87,7 @@ LEGEND_SWATCH_SIZE = 18
 INSTRUMENT_OVERLAY_WIDTH = 330
 INSTRUMENT_OVERLAY_MARGIN = 10
 CUTOFF_STATUS_EMPTY = "Cutoff bounds: no cutoff loaded."
+PRE_PROCESS_OUTPUT_DIR_NAME = "pcb2gcode-ui-preprocess"
 BODY_TEXT_SIZE = 12
 SMALL_TEXT_SIZE = 11
 SECTION_TITLE_SIZE = 15
@@ -881,20 +886,7 @@ class Pcb2GCodeApp:
         if messages:
             self._set_output("\n".join(message.text for message in messages))
             return
-        try:
-            with TemporaryDirectory(prefix="pcb2gcode-ui-preprocess-") as temp_dir:
-                pre_process_result = pre_process_input_files(
-                    self.values,
-                    self._base_dir(),
-                    Path(temp_dir),
-                )
-                result = validate_with_binary(
-                    pre_process_result.values,
-                    base_dir=self._base_dir(),
-                )
-                result = self._with_pre_process_summary(result, pre_process_result)
-        except OSError as error:
-            result = CommandResult(["pre-process"], 1, f"Pre-process failed: {error}")
+        result = validate_with_binary(self.values, base_dir=self._base_dir())
         self._set_command_result(result)
 
     def _generate(self, _event):
@@ -903,11 +895,40 @@ class Pcb2GCodeApp:
         if messages:
             self._set_output("\n".join(message.text for message in messages))
             return
+        pre_process_plan = None
+        if self._align_drills_enabled():
+            first_pass_values = self._first_pass_pre_process_values()
+            first_generation_result = generate_nc_files(
+                first_pass_values,
+                base_dir=self._base_dir(),
+            )
+            if not first_generation_result.ok:
+                self._set_command_result(first_generation_result)
+                return
+            try:
+                pre_process_plan = self._build_align_drills_plan(first_pass_values)
+            except (OSError, ValueError) as error:
+                self._set_command_result(
+                    CommandResult(
+                        first_generation_result.command,
+                        1,
+                        f"{first_generation_result.output}\n\nPre-process failed: {error}",
+                    )
+                )
+                return
+            self._set_value("x-offset", pre_process_plan.x_offset)
+            self._set_value("y-offset", pre_process_plan.y_offset)
+            messages = validate_values(self.values)
+            self._show_validation_messages(messages)
+            if messages:
+                self._set_output("\n".join(message.text for message in messages))
+                return
         try:
             pre_process_result = pre_process_input_files(
                 self.values,
                 self._base_dir(),
                 self._generation_output_dir(),
+                pre_process_plan,
             )
         except OSError as error:
             self._set_command_result(
@@ -967,6 +988,35 @@ class Pcb2GCodeApp:
             result.return_code,
             f"{result.output}\n\n{pre_process_result.summary}",
         )
+
+    def _align_drills_enabled(self) -> bool:
+        return (
+            bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false"))
+            and bool(self.values.get("drill", "").strip())
+            and bool(self.values.get("outline", "").strip())
+        )
+
+    def _first_pass_pre_process_values(self) -> dict[str, str]:
+        values = dict(self.values)
+        values["output-dir"] = str(self._pre_process_output_dir())
+        return values
+
+    def _pre_process_output_dir(self) -> Path:
+        return self._generation_output_dir() / PRE_PROCESS_OUTPUT_DIR_NAME
+
+    def _build_align_drills_plan(self, values: dict[str, str]) -> AlignDrillsPlan:
+        outline_path = generated_output_paths(
+            values,
+            self._base_dir(),
+            {"outline"},
+        )[0]
+        if not outline_path.exists():
+            raise ValueError(f"generated outline file not found: {outline_path}")
+        trace = GcodeInterpreter().parse_file(outline_path, "outline")
+        bounds = gcode_cutoff_bounds(trace)
+        if not bounds:
+            raise ValueError(f"generated outline file has no cut segments: {outline_path}")
+        return align_drills_plan(self.values, bounds)
 
     def _refresh_preview(self, _event):
         gcode_trace = None
