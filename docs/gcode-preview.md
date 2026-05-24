@@ -50,6 +50,10 @@ arrow marks `X+`, the green arrow marks `Y+`, and the filename label identifies 
 axis belongs to. Existing NC files with no movement still draw an axis; missing NC files only add
 a warning.
 
+When a back Gerber or NC file is loaded, the preview draws the configured mirror line as a white
+dotted reference line below all layouts. It spans the whole preview canvas, is vertical for normal X
+mirroring, and is horizontal when `mirror-yaxis=true`.
+
 Preview bounds are calculated from all configured Gerber, drill, Aux, and loaded NC files, not
 only currently visible layers. This keeps the rendered image size stable when layer checkboxes are
 toggled.

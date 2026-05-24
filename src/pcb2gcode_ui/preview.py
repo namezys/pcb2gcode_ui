@@ -59,6 +59,11 @@ GCODE_AXIS_FONT_SIZE = 110
 GCODE_AXIS_COLOR = (210, 216, 222, 230)
 GCODE_AXIS_LABEL_COLOR = (245, 245, 245, 240)
 GCODE_AXIS_ORIGIN_COLOR = (245, 245, 245, 255)
+GCODE_MIRROR_LINE_COLOR = (255, 255, 255, 255)
+GCODE_MIRROR_LINE_HALO_COLOR = (0, 0, 0, 210)
+GCODE_MIRROR_LINE_WIDTH_MM = 0.04
+GCODE_MIRROR_LINE_HALO_WIDTH_MM = 0.08
+GCODE_MIRROR_LINE_GAP_MM = 0.45
 
 
 class PreviewSide(StrEnum):
@@ -192,6 +197,7 @@ class TransformSettings:
     tile_x: int
     tile_y: int
     board_bounds: Bounds
+    mirror_axis_mm: float = 0
 
 
 class GerberPreviewRenderer:
@@ -225,12 +231,14 @@ class GerberPreviewRenderer:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
 
         settings = _transform_settings(values, source_bounds)
+        draw_mirror_line = _has_mirror_line_source(all_gerber_layers, sizing_gcode_trace)
         transformed_bounds = _transformed_bounds(
             all_rendered_layers,
             all_drill_layer,
             settings,
             sizing_gcode_trace,
             options,
+            draw_mirror_line,
         )
         if not transformed_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
@@ -263,6 +271,7 @@ class GerberPreviewRenderer:
             settings,
             options,
             gcode_trace,
+            draw_mirror_line,
         )
         png = _png_bytes(image)
         layer_count = (
@@ -705,6 +714,7 @@ def _transform_settings(values: dict[str, str], board_bounds: Bounds) -> Transfo
         tile_x=max(_int_value(values.get("tile-x", "1"), 1), 1),
         tile_y=max(_int_value(values.get("tile-y", "1"), 1), 1),
         board_bounds=board_bounds,
+        mirror_axis_mm=_length_mm(values.get("mirror-axis", "0"), metric),
     )
 
 
@@ -714,6 +724,7 @@ def _transformed_bounds(
     settings: TransformSettings,
     gcode_trace: GcodeTrace = None,
     options: PreviewOptions = None,
+    draw_mirror_line: bool = False,
 ) -> Bounds | None:
     preview_options = options or PreviewOptions()
     bounds: Bounds = None
@@ -770,6 +781,9 @@ def _transformed_bounds(
             max(point[1] for point in points),
         )
         bounds = trace_bounds if bounds is None else bounds.expand(trace_bounds)
+    if _should_draw_mirror_line(preview_options, draw_mirror_line) and bounds:
+        mirror_line_bounds = _mirror_line_bounds(bounds, settings, preview_options)
+        bounds = bounds.expand(mirror_line_bounds)
     if bounds is None:
         return None
     return Bounds(
@@ -846,10 +860,13 @@ def _compose_preview(
     settings: TransformSettings,
     options: PreviewOptions,
     gcode_trace: GcodeTrace = None,
+    draw_mirror_line: bool = False,
 ) -> Image.Image:
     width_px = max(math.ceil(bounds.width * options.dpmm), MIN_CANVAS_SIZE)
     height_px = max(math.ceil(bounds.height * options.dpmm), MIN_CANVAS_SIZE)
     board_image = Image.new("RGBA", (width_px, height_px), (32, 35, 38, 255))
+    if _should_draw_mirror_line(options, draw_mirror_line):
+        _draw_mirror_line(board_image, bounds, settings, options)
     for layer_kind in _layer_paint_order(options.side):
         if layer_kind == PreviewLayerKind.DRILL:
             if drill_layer and drill_layer.hits:
@@ -1053,6 +1070,87 @@ def _draw_gcode_trace(
                 width=max(round(options.dpmm * GCODE_RETRACT_WIDTH_MM), 1),
                 gap_px=max(round(options.dpmm * GCODE_RETRACT_GAP_MM), 2),
             )
+
+
+def _has_mirror_line_source(
+    gerber_layers: list[GerberLayer],
+    gcode_trace: GcodeTrace = None,
+) -> bool:
+    has_back_gerber = any(layer.kind == PreviewLayerKind.BACK for layer in gerber_layers)
+    return has_back_gerber or _has_gcode_preview(gcode_trace)
+
+
+def _should_draw_mirror_line(options: PreviewOptions, draw_mirror_line: bool) -> bool:
+    return draw_mirror_line
+
+
+def _mirror_line_bounds(
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+) -> Bounds:
+    axis_x, axis_y = _transform_layout_point(
+        settings.mirror_axis_mm,
+        settings.mirror_axis_mm,
+        PreviewLayerKind.FRONT,
+        settings,
+        options,
+    )
+    if settings.mirror_yaxis:
+        return Bounds(bounds.min_x, axis_y, bounds.max_x, axis_y)
+    return Bounds(axis_x, bounds.min_y, axis_x, bounds.max_y)
+
+
+def _draw_mirror_line(
+    image: Image.Image,
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+):
+    start, end = _preview_mirror_line_points(bounds, settings, options, image.size)
+    draw = ImageDraw.Draw(image)
+    gap_px = max(round(options.dpmm * GCODE_MIRROR_LINE_GAP_MM), 4)
+    _draw_dotted_line(
+        draw,
+        start,
+        end,
+        fill=GCODE_MIRROR_LINE_HALO_COLOR,
+        width=max(round(options.dpmm * GCODE_MIRROR_LINE_HALO_WIDTH_MM), 2),
+        gap_px=gap_px,
+    )
+    _draw_dotted_line(
+        draw,
+        start,
+        end,
+        fill=GCODE_MIRROR_LINE_COLOR,
+        width=max(round(options.dpmm * GCODE_MIRROR_LINE_WIDTH_MM), 1),
+        gap_px=gap_px,
+    )
+
+
+def _preview_mirror_line_points(
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+    image_size: tuple[int, int],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    axis_x, axis_y = _transform_layout_point(
+        settings.mirror_axis_mm,
+        settings.mirror_axis_mm,
+        PreviewLayerKind.FRONT,
+        settings,
+        options,
+    )
+    image_width, image_height = image_size
+    if settings.mirror_yaxis:
+        return (
+            (0, (bounds.max_y - axis_y) * options.dpmm),
+            (image_width, (bounds.max_y - axis_y) * options.dpmm),
+        )
+    return (
+        ((axis_x - bounds.min_x) * options.dpmm, 0),
+        ((axis_x - bounds.min_x) * options.dpmm, image_height),
+    )
 
 
 def _gcode_segment_alpha(

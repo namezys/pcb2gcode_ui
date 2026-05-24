@@ -14,6 +14,7 @@ from pcb2gcode_ui.gcode_preview import (
 from pcb2gcode_ui.preview import (
     DEFAULT_PREVIEW_DPMM,
     GCODE_CUT_ALPHA,
+    GCODE_MIRROR_LINE_COLOR,
     Bounds,
     DrillHit,
     DrillLayer,
@@ -311,7 +312,7 @@ def test_compose_preview_front_side_paints_front_over_back():
         kind=PreviewLayerKind.BACK,
         bounds=Bounds(0, 0, 1, 1),
     )
-    settings = _preview_settings(Bounds(0, 0, 1, 1))
+    settings = _preview_settings(Bounds(0, 0, 1, 1), mirror_axis_mm=100)
 
     image = _compose_preview(
         [front_layer, back_layer],
@@ -337,7 +338,7 @@ def test_compose_preview_back_side_paints_back_over_front():
         kind=PreviewLayerKind.BACK,
         bounds=Bounds(0, 0, 1, 1),
     )
-    settings = _preview_settings(Bounds(0, 0, 1, 1))
+    settings = _preview_settings(Bounds(0, 0, 1, 1), mirror_axis_mm=100)
 
     image = _compose_preview(
         [front_layer, back_layer],
@@ -400,7 +401,7 @@ def test_compose_preview_front_side_alpha_affects_only_front_and_drill():
         kind=PreviewLayerKind.BACK,
         bounds=Bounds(0, 0, 1, 1),
     )
-    settings = _preview_settings(Bounds(0, 0, 1, 1))
+    settings = _preview_settings(Bounds(0, 0, 1, 1), mirror_axis_mm=100)
 
     image = _compose_preview(
         [front_layer, back_layer],
@@ -428,7 +429,7 @@ def test_compose_preview_back_side_alpha_affects_only_back_and_drill():
         kind=PreviewLayerKind.BACK,
         bounds=Bounds(0, 0, 1, 1),
     )
-    settings = _preview_settings(Bounds(0, 0, 1, 1))
+    settings = _preview_settings(Bounds(0, 0, 1, 1), mirror_axis_mm=100)
 
     image = _compose_preview(
         [front_layer, back_layer],
@@ -547,7 +548,7 @@ def test_compose_preview_back_side_mirrors_all_layers_horizontally():
         kind=PreviewLayerKind.FRONT,
         bounds=Bounds(0, 0, 2, 1),
     )
-    settings = _preview_settings(Bounds(0, 0, 2, 1))
+    settings = _preview_settings(Bounds(0, 0, 2, 1), mirror_axis_mm=100)
 
     image = _compose_preview(
         [front_layer],
@@ -569,7 +570,7 @@ def test_compose_preview_back_side_mirrors_all_layers_horizontally():
 def test_compose_preview_back_side_mirrors_drills_horizontally():
     drill_color = (87, 178, 255)
     drill_layer = DrillLayer([DrillHit(2, 5, 1)], [])
-    settings = _preview_settings(Bounds(0, 0, 10, 10))
+    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_axis_mm=100)
 
     image = _compose_preview(
         [],
@@ -835,6 +836,303 @@ def test_compose_preview_mirrors_back_gcode_axis_on_back_side():
     assert image.getpixel((30, 50))[:3] == (210, 216, 222)
 
 
+def test_compose_preview_draws_mirror_line_on_back_side_with_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(2, 2, -0.1),
+                GcodePoint(3, 2, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-4, -1, 1, 5),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+        draw_mirror_line=True,
+    )
+
+    white_pixels = [
+        image.getpixel((40, y_value))[:3]
+        for y_value in range(image.height)
+        if image.getpixel((40, y_value))[:3] == GCODE_MIRROR_LINE_COLOR[:3]
+    ]
+    assert white_pixels
+
+
+def test_compose_preview_draws_mirror_line_below_gcode_axis():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(1, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc")],
+    )
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-2, -2, 2, 2),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=20,
+        ),
+        trace,
+        draw_mirror_line=True,
+    )
+
+    assert image.getpixel((40, 40))[:3] != GCODE_MIRROR_LINE_COLOR[:3]
+    assert image.getpixel((40, 40))[:3] != (32, 35, 38)
+
+
+def test_compose_preview_draws_mirror_line_when_back_source_loaded():
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-4, -1, 1, 5),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=False,
+            dpmm=10,
+        ),
+        None,
+        draw_mirror_line=True,
+    )
+
+    white_pixels = [
+        image.getpixel((40, y_value))[:3]
+        for y_value in range(image.height)
+        if image.getpixel((40, y_value))[:3] == GCODE_MIRROR_LINE_COLOR[:3]
+    ]
+    assert white_pixels
+
+
+def test_compose_preview_draws_mirror_line_across_tiled_canvas():
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-2, -2, 2, 2),
+        TransformSettings(
+            metric=settings.metric,
+            zero_start=settings.zero_start,
+            mirror_yaxis=settings.mirror_yaxis,
+            x_offset_mm=settings.x_offset_mm,
+            y_offset_mm=settings.y_offset_mm,
+            tile_x=1,
+            tile_y=2,
+            board_bounds=settings.board_bounds,
+            mirror_axis_mm=settings.mirror_axis_mm,
+        ),
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=10,
+        ),
+        None,
+        draw_mirror_line=True,
+    )
+
+    colored_pixels = [
+        image.getpixel((20, y_value))[:3]
+        for y_value in range(image.height // 2, image.height)
+        if image.getpixel((20, y_value))[:3] == GCODE_MIRROR_LINE_COLOR[:3]
+    ]
+    assert colored_pixels
+
+
+def test_render_preview_draws_visible_back_side_mirror_line_for_back_gerber():
+    values = {"back": "pcb2gcode/extras/example_board/example_board-B.Cu.gbr", "metric": "true"}
+    renderer = GerberPreviewRenderer()
+
+    result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=1,
+        ),
+    )
+
+    image = Image.open(BytesIO(result.png))
+    white_pixel_count = sum(
+        1
+        for y_value in range(image.height)
+        for x_value in range(image.width)
+        if image.getpixel((x_value, y_value)) == GCODE_MIRROR_LINE_COLOR
+    )
+    assert white_pixel_count > 0
+
+
+def test_render_preview_draws_mirror_line_on_front_view_for_back_gerber():
+    values = {"back": "pcb2gcode/extras/example_board/example_board-B.Cu.gbr", "metric": "true"}
+    renderer = GerberPreviewRenderer()
+
+    result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            side=PreviewSide.FRONT,
+            show_back=False,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=1,
+        ),
+    )
+
+    image = Image.open(BytesIO(result.png))
+    white_pixel_count = sum(
+        1
+        for y_value in range(image.height)
+        for x_value in range(image.width)
+        if image.getpixel((x_value, y_value)) == GCODE_MIRROR_LINE_COLOR
+    )
+    assert white_pixel_count > 0
+
+
+def test_render_preview_does_not_draw_back_side_mirror_line_for_front_only_project():
+    values = {"front": "pcb2gcode/extras/example_board/example_board-F.Cu.gbr", "metric": "true"}
+    renderer = GerberPreviewRenderer()
+
+    result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_drill=False,
+            show_cutoff=False,
+            dpmm=1,
+        ),
+    )
+
+    image = Image.open(BytesIO(result.png))
+    white_pixel_count = sum(
+        1
+        for y_value in range(image.height)
+        for x_value in range(image.width)
+        if image.getpixel((x_value, y_value)) == GCODE_MIRROR_LINE_COLOR
+    )
+    assert white_pixel_count == 0
+
+
+def test_compose_preview_does_not_draw_mirror_line_without_back_side():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(2, 2, -0.1),
+                GcodePoint(3, 2, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-1, -1, 5, 5),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((10, 30))[:3] == (32, 35, 38)
+
+
+def test_compose_preview_draws_y_mirror_line_when_enabled():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(2, 2, -0.1),
+                GcodePoint(3, 2, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 4, 4), mirror_yaxis=True, mirror_axis_mm=1)
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-4, -1, 1, 5),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+        draw_mirror_line=True,
+    )
+
+    assert image.getpixel((25, 40))[:3] == GCODE_MIRROR_LINE_COLOR[:3]
+
+
 def test_compose_preview_scales_gcode_axis_from_largest_trace_size():
     trace = GcodeTrace(
         [
@@ -998,7 +1296,7 @@ def test_compose_preview_flips_back_gcode_y_axis_when_enabled():
         ],
         [],
     )
-    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_yaxis=True)
+    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_yaxis=True, mirror_axis_mm=100)
 
     image = _compose_preview(
         [],
@@ -1068,7 +1366,7 @@ def test_compose_preview_back_side_uses_mirror_yaxis_back_gcode_layout():
         ],
         [],
     )
-    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_yaxis=True)
+    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_yaxis=True, mirror_axis_mm=100)
 
     image = _compose_preview(
         [],
@@ -1164,6 +1462,34 @@ def test_transformed_bounds_mirror_back_preview_from_coordinate_origin():
 
     assert bounds.min_x == -6
     assert bounds.max_x == 0
+
+
+def test_transformed_bounds_include_back_side_mirror_line():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(1, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 1, 1), mirror_axis_mm=10)
+
+    bounds = _transformed_bounds(
+        [],
+        None,
+        settings,
+        trace,
+        PreviewOptions(side=PreviewSide.BACK),
+        draw_mirror_line=True,
+    )
+
+    assert bounds.min_x == -12
 
 
 def test_transformed_bounds_scale_gcode_axis_from_largest_trace_size():
@@ -1544,7 +1870,11 @@ def test_transform_point_applies_zero_start_offsets():
     assert _transform_point(6, 12, settings) == (2, 4)
 
 
-def _preview_settings(bounds: Bounds, mirror_yaxis: bool = False) -> TransformSettings:
+def _preview_settings(
+    bounds: Bounds,
+    mirror_yaxis: bool = False,
+    mirror_axis_mm: float = 0,
+) -> TransformSettings:
     return TransformSettings(
         metric=True,
         zero_start=False,
@@ -1554,4 +1884,5 @@ def _preview_settings(bounds: Bounds, mirror_yaxis: bool = False) -> TransformSe
         tile_x=1,
         tile_y=1,
         board_bounds=bounds,
+        mirror_axis_mm=mirror_axis_mm,
     )
