@@ -152,6 +152,7 @@ def test_app_build_adds_process_tabs_and_options():
     assert "pre-align-drill-source" in app.controls
     assert "Post-process" in app.group_controls
     assert "post-remove-t" in app.controls
+    assert "post-origin-before-m3" in app.controls
 
 
 def test_app_restores_last_working_directory(tmp_path: Path, monkeypatch):
@@ -486,7 +487,9 @@ def test_successful_generation_runs_enabled_post_process(monkeypatch):
     app._generate(None)
 
     assert calls
-    assert "Post-process: commented T* lines in 1 file(s), 3 line(s)." in app.command_output.value
+    assert "Post-process: changed 1 file(s), commented T* in 3 line(s)." in (
+        app.command_output.value
+    )
     assert app.generated_values_snapshot == app.values
 
 

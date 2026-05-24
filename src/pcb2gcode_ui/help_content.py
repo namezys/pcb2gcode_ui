@@ -225,6 +225,16 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "lines to execute. Matching commands are preserved as `(PP: remove ...)` comments.",
         (SOURCE_LOCAL_UI,),
     ),
+    "post-origin-before-m3": _entry(
+        "post-origin-before-m3",
+        "Origin before M3",
+        "bool, default `false`",
+        "Inserts `G00 X0.00000 Y0.00000` before spindle start.",
+        "UI-only post-processing step run after successful NC generation. Enable it for "
+        "controllers that should return to XY origin before `M3`/`M03` spindle-start commands. "
+        "The insertion is idempotent.",
+        (SOURCE_LOCAL_UI,),
+    ),
     "pre-align-drills": _entry(
         "pre-align-drills",
         "Align drills",

@@ -50,6 +50,7 @@ def test_build_arguments_skips_ui_only_process_options():
             "pre-align-drill-depth": "-1mm",
             "pre-align-drill-output": "align.ngc",
             "pre-align-drill-source": "align.drl",
+            "post-origin-before-m3": "true",
         }
     )
 

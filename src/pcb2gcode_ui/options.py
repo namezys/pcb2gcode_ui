@@ -17,6 +17,7 @@ UI_ONLY_OPTIONS = {
     "pre-align-drill-depth",
     "pre-align-drill-output",
     "pre-align-drill-source",
+    "post-origin-before-m3",
     "post-remove-t",
 }
 
@@ -364,6 +365,14 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "Align drill source",
         "text",
         "Generated Excellon source for separated alignment holes.",
+    ),
+    OptionSpec(
+        "post-origin-before-m3",
+        "Post-process",
+        "Origin before M3",
+        "bool",
+        "Insert XY origin move before spindle start.",
+        "false",
     ),
     OptionSpec(
         "post-remove-t",

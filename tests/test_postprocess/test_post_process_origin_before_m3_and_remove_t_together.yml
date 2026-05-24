@@ -1,0 +1,15 @@
+changed_files: 1
+commented_lines: 1
+front: 'G21
+
+  (PP: remove T1 M6)
+
+  G00 X0.00000 Y0.00000
+
+  M3
+
+  '
+inserted_origin_moves: 1
+processed_files: 1
+summary: 'Post-process: changed 1 file(s), commented T* in 1 line(s), inserted origin
+  move before M3 1 time(s).'

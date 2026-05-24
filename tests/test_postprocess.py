@@ -57,6 +57,87 @@ def test_post_process_remove_t_comments_tool_select_lines(tmp_path: Path, data_r
     )
 
 
+def test_post_process_origin_before_m3_inserts_origin_move(tmp_path: Path, data_regression):
+    output_dir = tmp_path / "nc"
+    output_dir.mkdir()
+    output_path = output_dir / "front.ngc"
+    output_path.write_text("G21\nM3 S12000\nG1 X1\nM03\n", encoding="utf-8")
+
+    result = post_process_generated_files(
+        {
+            "front": str(tmp_path / "front.gbr"),
+            "output-dir": str(output_dir),
+            "post-origin-before-m3": "true",
+        },
+        tmp_path,
+    )
+
+    data_regression.check(
+        {
+            "processed_files": result.processed_files,
+            "changed_files": result.changed_files,
+            "commented_lines": result.commented_lines,
+            "inserted_origin_moves": result.inserted_origin_moves,
+            "summary": result.summary,
+            "front": output_path.read_text(encoding="utf-8"),
+        }
+    )
+
+
+def test_post_process_origin_before_m3_is_idempotent(tmp_path: Path, data_regression):
+    output_dir = tmp_path / "nc"
+    output_dir.mkdir()
+    output_path = output_dir / "front.ngc"
+    output_path.write_text("G21\nG00 X0.00000 Y0.00000\nM3\n", encoding="utf-8")
+
+    result = post_process_generated_files(
+        {
+            "front": str(tmp_path / "front.gbr"),
+            "output-dir": str(output_dir),
+            "post-origin-before-m3": "true",
+        },
+        tmp_path,
+    )
+
+    data_regression.check(
+        {
+            "processed_files": result.processed_files,
+            "changed_files": result.changed_files,
+            "commented_lines": result.commented_lines,
+            "inserted_origin_moves": result.inserted_origin_moves,
+            "front": output_path.read_text(encoding="utf-8"),
+        }
+    )
+
+
+def test_post_process_origin_before_m3_and_remove_t_together(tmp_path: Path, data_regression):
+    output_dir = tmp_path / "nc"
+    output_dir.mkdir()
+    output_path = output_dir / "front.ngc"
+    output_path.write_text("G21\nT1 M6\nM3\n", encoding="utf-8")
+
+    result = post_process_generated_files(
+        {
+            "front": str(tmp_path / "front.gbr"),
+            "output-dir": str(output_dir),
+            "post-origin-before-m3": "true",
+            "post-remove-t": "true",
+        },
+        tmp_path,
+    )
+
+    data_regression.check(
+        {
+            "processed_files": result.processed_files,
+            "changed_files": result.changed_files,
+            "commented_lines": result.commented_lines,
+            "inserted_origin_moves": result.inserted_origin_moves,
+            "summary": result.summary,
+            "front": output_path.read_text(encoding="utf-8"),
+        }
+    )
+
+
 def test_post_process_remove_t_skips_missing_outputs(tmp_path: Path, data_regression):
     output_dir = tmp_path / "nc"
     output_dir.mkdir()

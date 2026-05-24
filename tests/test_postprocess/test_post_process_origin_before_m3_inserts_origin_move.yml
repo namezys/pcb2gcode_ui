@@ -1,0 +1,18 @@
+changed_files: 1
+commented_lines: 0
+front: 'G21
+
+  G00 X0.00000 Y0.00000
+
+  M3 S12000
+
+  G1 X1
+
+  G00 X0.00000 Y0.00000
+
+  M03
+
+  '
+inserted_origin_moves: 2
+processed_files: 1
+summary: 'Post-process: changed 1 file(s), inserted origin move before M3 2 time(s).'
