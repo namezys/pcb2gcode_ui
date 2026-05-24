@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -109,6 +110,14 @@ class GcodeBounds:
     min_y: float
     max_x: float
     max_y: float
+
+    @property
+    def width(self) -> float:
+        return self.max_x - self.min_x
+
+    @property
+    def height(self) -> float:
+        return self.max_y - self.min_y
 
 
 @dataclass(frozen=True)
@@ -447,6 +456,54 @@ def gcode_trace_summary(trace: GcodeTrace) -> str:
     )
 
 
+def gcode_cutoff_bounds(
+    trace: GcodeTrace,
+    transform: Callable[[GcodePoint], tuple[float, float]] = None,
+) -> GcodeBounds | None:
+    points = [_gcode_cutoff_point(point, transform) for point in _gcode_cutoff_points(trace)]
+    if not points:
+        return None
+    return GcodeBounds(
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
+    )
+
+
+def _gcode_cutoff_points(trace: GcodeTrace) -> list[GcodePoint]:
+    return [
+        point
+        for segment in trace.segments
+        if segment.source_kind == "outline" and segment.movement == GcodeMovementKind.CUT
+        for point in (segment.start, segment.end)
+    ]
+
+
+def _gcode_cutoff_point(
+    point: GcodePoint,
+    transform: Callable[[GcodePoint], tuple[float, float]] = None,
+) -> tuple[float, float]:
+    if transform:
+        return transform(point)
+    return point.x_mm, point.y_mm
+
+
+def gcode_cutoff_bounds_summary(
+    trace: GcodeTrace,
+    transform: Callable[[GcodePoint], tuple[float, float]] = None,
+) -> str:
+    bounds = gcode_cutoff_bounds(trace, transform)
+    if not bounds:
+        return ""
+    return (
+        "Cutoff bounds: "
+        f"LB ({_format_mm(bounds.min_x)}, {_format_mm(bounds.min_y)}), "
+        f"TR ({_format_mm(bounds.max_x)}, {_format_mm(bounds.max_y)}), "
+        f"W {_format_mm(bounds.width)}, H {_format_mm(bounds.height)} mm."
+    )
+
+
 def gcode_instrument_color(index: int) -> str:
     return GCODE_INSTRUMENT_COLORS[index % len(GCODE_INSTRUMENT_COLORS)]
 
@@ -508,6 +565,11 @@ def _normalize_diameter(value: str) -> str:
     if "." in number:
         number = number.rstrip("0").rstrip(".")
     return f"{number}{unit}"
+
+
+def _format_mm(value: float) -> str:
+    formatted = f"{value:.5f}".rstrip("0").rstrip(".")
+    return formatted or "0"
 
 
 def _implicit_instruments(segments: list[GcodeSegment]) -> list[GcodeInstrument]:

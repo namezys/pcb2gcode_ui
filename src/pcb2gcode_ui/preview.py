@@ -22,6 +22,8 @@ from pcb2gcode_ui.gcode_preview import (
     GcodePoint,
     GcodeSource,
     GcodeTrace,
+    gcode_cutoff_bounds,
+    gcode_cutoff_bounds_summary,
     gcode_instrument_color,
     gcode_tool_path_id,
 )
@@ -728,6 +730,32 @@ def _back_gcode_source_kinds(values: dict[str, str]) -> tuple[str, ...]:
     if values.get("drill-side", "").strip().lower() == "back":
         source_kinds.update(("drill", "milldrill"))
     return tuple(sorted(source_kinds))
+
+
+def transformed_gcode_cutoff_bounds_summary(
+    trace: GcodeTrace,
+    values: dict[str, str],
+    side: PreviewSide,
+) -> str:
+    bounds = gcode_cutoff_bounds(trace)
+    if not bounds:
+        return ""
+    settings = _transform_settings(
+        values,
+        Bounds(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y),
+    )
+    options = PreviewOptions(side=side)
+    return gcode_cutoff_bounds_summary(
+        trace,
+        lambda point: _transform_layout_point(
+            point.x_mm,
+            point.y_mm,
+            "outline",
+            settings,
+            options,
+            mirror_back_source=True,
+        ),
+    )
 
 
 def _transformed_bounds(

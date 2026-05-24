@@ -1,13 +1,18 @@
 from pathlib import Path
 
 from pcb2gcode_ui.gcode_preview import (
+    GcodeBounds,
     GcodeInstrument,
     GcodeInterpreter,
     GcodeMovementKind,
+    GcodePoint,
+    GcodeSegment,
     GcodeSource,
     GcodeToolParameters,
     GcodeToolPath,
     GcodeTrace,
+    gcode_cutoff_bounds,
+    gcode_cutoff_bounds_summary,
     gcode_tool_parameters_label,
     load_gcode_trace,
 )
@@ -179,6 +184,64 @@ def test_tool_parameter_label_is_mixed_for_grouped_tool_path():
     )
 
     assert gcode_tool_parameters_label(trace, "front:2") == "mixed"
+
+
+def test_gcode_cutoff_bounds_uses_outline_cut_segments_only():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(-100, -100, 1),
+                GcodeMovementKind.RETRACT,
+                "1",
+                "outline",
+                1,
+            ),
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12.5, 8.25, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "outline",
+                2,
+            ),
+            GcodeSegment(
+                GcodePoint(-50, -50, -0.1),
+                GcodePoint(50, 50, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                3,
+            ),
+        ],
+        [],
+    )
+
+    bounds = gcode_cutoff_bounds(trace)
+
+    assert bounds == GcodeBounds(10, 5, 12.5, 8.25)
+    assert gcode_cutoff_bounds_summary(trace) == (
+        "Cutoff bounds: LB (10, 5), TR (12.5, 8.25), W 2.5, H 3.25 mm."
+    )
+
+
+def test_gcode_cutoff_bounds_ignores_outline_retract_only_trace():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12, 8, 1),
+                GcodeMovementKind.RETRACT,
+                "1",
+                "outline",
+                1,
+            ),
+        ],
+        [],
+    )
+
+    assert gcode_cutoff_bounds(trace) is None
+    assert gcode_cutoff_bounds_summary(trace) == ""
 
 
 def test_interpreter_supports_inch_and_incremental_modes():

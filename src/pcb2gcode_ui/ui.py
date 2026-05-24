@@ -42,6 +42,7 @@ from pcb2gcode_ui.preview import (
     PreviewOptions,
     PreviewResult,
     PreviewSide,
+    transformed_gcode_cutoff_bounds_summary,
 )
 from pcb2gcode_ui.runner import (
     CommandResult,
@@ -75,6 +76,7 @@ LEGEND_COLOR_WIDTH = 150
 LEGEND_SWATCH_SIZE = 18
 INSTRUMENT_OVERLAY_WIDTH = 330
 INSTRUMENT_OVERLAY_MARGIN = 10
+CUTOFF_STATUS_EMPTY = "Cutoff bounds: no cutoff loaded."
 BODY_TEXT_SIZE = 12
 SMALL_TEXT_SIZE = 11
 SECTION_TITLE_SIZE = 15
@@ -161,6 +163,11 @@ class Pcb2GCodeApp:
         )
         self.preview_status = ft.Text(
             "Preview is not rendered yet.",
+            color=MUTED_TEXT_COLOR,
+            size=BODY_TEXT_SIZE,
+        )
+        self.cutoff_status = ft.Text(
+            CUTOFF_STATUS_EMPTY,
             color=MUTED_TEXT_COLOR,
             size=BODY_TEXT_SIZE,
         )
@@ -388,6 +395,7 @@ class Pcb2GCodeApp:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 self.preview_status,
+                self.cutoff_status,
                 ft.Container(
                     content=ft.Stack(
                         [
@@ -946,8 +954,18 @@ class Pcb2GCodeApp:
     def _set_gcode_status(self):
         if not self.gcode_trace:
             self.gcode_status.value = "G-code is not loaded."
+            self.cutoff_status.value = CUTOFF_STATUS_EMPTY
             return
         lines = [gcode_trace_summary(self.gcode_trace)]
+        cutoff_summary = transformed_gcode_cutoff_bounds_summary(
+            self.gcode_trace,
+            self.values,
+            self.preview_side,
+        )
+        if cutoff_summary:
+            self.cutoff_status.value = cutoff_summary
+        else:
+            self.cutoff_status.value = CUTOFF_STATUS_EMPTY
         if self.gcode_trace.warnings:
             lines.extend(self.gcode_trace.warnings[:4])
             if len(self.gcode_trace.warnings) > 4:

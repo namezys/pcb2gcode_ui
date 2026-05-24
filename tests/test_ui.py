@@ -619,7 +619,7 @@ def test_preview_content_uses_three_compact_control_rows():
 
     content = app._build_preview_content()
     first_row, second_row, third_row = content.controls[:3]
-    preview_status, preview_canvas, gcode_status = content.controls[3:6]
+    preview_status, cutoff_status, preview_canvas, gcode_status = content.controls[3:7]
     first_labels = [_button_label(control) for control in first_row.controls]
     second_labels = [_control_label(control) for control in second_row.controls]
     third_labels = [_control_label(control) for control in third_row.controls]
@@ -641,6 +641,7 @@ def test_preview_content_uses_three_compact_control_rows():
     assert all(_is_default_checkbox(control) for control in second_row.controls[1:])
     assert all(_is_default_checkbox(control) for control in third_row.controls[1:])
     assert preview_status is app.preview_status
+    assert cutoff_status is app.cutoff_status
     preview_viewport = preview_canvas.content.controls[0]
     assert isinstance(preview_viewport, ft.InteractiveViewer)
     assert preview_viewport.content is app.preview_image
@@ -816,6 +817,134 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     assert rows[3].controls[4].value == "1"
     assert rows[3].controls[0].color == gcode_instrument_color(0)
     assert len(rows) == 4
+
+
+def test_gcode_status_shows_cutoff_bounds_from_outline_cut_paths():
+    app = _app()
+    app.gcode_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12.5, 8.25, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "outline",
+                1,
+            ),
+            GcodeSegment(
+                GcodePoint(-100, -100, -0.1),
+                GcodePoint(100, 100, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                2,
+            ),
+        ],
+        [],
+    )
+
+    app._set_gcode_status()
+
+    assert (
+        "Cutoff bounds: LB (10, 5), TR (12.5, 8.25), W 2.5, H 3.25 mm."
+        == app.cutoff_status.value
+    )
+    assert "Cutoff bounds:" not in app.gcode_status.value
+
+
+def test_cutoff_status_uses_cut_side_back_transform():
+    app = _app()
+    app.values["cut-side"] = "back"
+    app.gcode_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12.5, 8.25, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "outline",
+                1,
+            ),
+        ],
+        [],
+    )
+
+    app._set_gcode_status()
+
+    assert app.cutoff_status.value == (
+        "Cutoff bounds: LB (-12.5, 5), TR (-10, 8.25), W 2.5, H 3.25 mm."
+    )
+
+
+def test_cutoff_status_uses_preview_back_side_transform():
+    app = _app()
+    app.preview_side = PreviewSide.BACK
+    app.gcode_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12.5, 8.25, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "outline",
+                1,
+            ),
+        ],
+        [],
+    )
+
+    app._set_gcode_status()
+
+    assert app.cutoff_status.value == (
+        "Cutoff bounds: LB (-12.5, 5), TR (-10, 8.25), W 2.5, H 3.25 mm."
+    )
+
+
+def test_cutoff_status_uses_y_mirror_transform():
+    app = _app()
+    app.values["cut-side"] = "back"
+    app.values["mirror-yaxis"] = "true"
+    app.gcode_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12.5, 8.25, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "outline",
+                1,
+            ),
+        ],
+        [],
+    )
+
+    app._set_gcode_status()
+
+    assert app.cutoff_status.value == (
+        "Cutoff bounds: LB (10, -8.25), TR (12.5, -5), W 2.5, H 3.25 mm."
+    )
+
+
+def test_cutoff_status_reports_no_cutoff_without_outline_cut_paths():
+    app = _app()
+    app.gcode_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(10, 5, 1),
+                GcodePoint(12.5, 8.25, 1),
+                GcodeMovementKind.RETRACT,
+                "1",
+                "outline",
+                1,
+            ),
+        ],
+        [],
+    )
+
+    app._set_gcode_status()
+
+    assert app.cutoff_status.value == "Cutoff bounds: no cutoff loaded."
+    assert "Cutoff bounds:" not in app.gcode_status.value
 
 
 def test_gcode_instrument_overlay_separates_nc_files():
