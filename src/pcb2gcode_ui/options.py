@@ -11,6 +11,7 @@ OUTPUT_FILE_OPTIONS = {
     "milldrill-output",
     "outline-output",
 }
+UI_ONLY_OPTIONS = {"post-remove-t"}
 
 
 @dataclass(frozen=True)
@@ -320,6 +321,14 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "mirror-axis", "Alignment", "Mirror X axis", "number", "Two-sided flip axis x=VALUE.", "0"
     ),
     OptionSpec("mirror-yaxis", "Alignment", "Mirror Y axis", "bool", "Flip along Y axis.", "false"),
+    OptionSpec(
+        "post-remove-t",
+        "Post-process",
+        "Remove T*",
+        "bool",
+        "Comment generated tool-select lines.",
+        "false",
+    ),
 )
 
 SPEC_BY_KEY = {spec.key: spec for spec in OPTION_SPECS}

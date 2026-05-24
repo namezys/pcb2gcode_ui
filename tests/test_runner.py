@@ -36,3 +36,9 @@ def test_build_arguments_resolves_relative_paths_against_base_dir(tmp_path: Path
         f"--output-dir={tmp_path / 'nc'}",
         f"--front={tmp_path / 'front.gbr'}",
     ]
+
+
+def test_build_arguments_skips_ui_only_post_process_options():
+    args = build_arguments({"post-remove-t": "true"})
+
+    assert args == ["--noconfigfile"]

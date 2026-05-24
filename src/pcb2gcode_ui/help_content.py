@@ -208,6 +208,16 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "first; this is a pcb2gcode-level check, not a replacement for machine review.",
         (SOURCE_LOCAL_UI,),
     ),
+    "post-remove-t": _entry(
+        "post-remove-t",
+        "Remove T*",
+        "bool, default `false`",
+        "Comments generated lines containing `T` followed by digits.",
+        "UI-only post-processing step run after successful NC generation. Enable it for "
+        "controllers that do not want standalone tool-select lines or `Tn M6` tool-change "
+        "lines to execute. Matching commands are preserved as `(PP: remove ...)` comments.",
+        (SOURCE_LOCAL_UI,),
+    ),
     "single-thread": _entry(
         "single-thread",
         "Single thread",

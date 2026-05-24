@@ -1,0 +1,18 @@
+changed_files: 1
+commented_lines: 3
+front: 'G21
+
+  (PP: remove T1)
+
+  (PP: remove T12 M6)
+
+  (PP: remove T3M6)
+
+  M6
+
+  (MSG, no tool select)
+
+  G1 X1
+
+  '
+processed_files: 1

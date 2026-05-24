@@ -35,6 +35,7 @@ from pcb2gcode_ui.options import (
     default_output_directory,
     default_values,
 )
+from pcb2gcode_ui.postprocess import POST_REMOVE_T_KEY, post_process_generated_files
 from pcb2gcode_ui.preview import (
     DEFAULT_LAYER_ALPHA,
     GerberPreviewRenderer,
@@ -880,12 +881,31 @@ class Pcb2GCodeApp:
             self._set_command_result(validation_result)
             return
         generation_result = generate_nc_files(self.values, base_dir=self._base_dir())
+        if generation_result.ok:
+            generation_result = self._post_process_generation_result(generation_result)
         self._set_command_result(generation_result)
         if generation_result.ok:
             self.generated_values_snapshot = self._values_snapshot()
             self._reset_gcode_preview_after_generation()
             self._update_generation_status()
             self.page.update()
+
+    def _post_process_generation_result(self, result: CommandResult) -> CommandResult:
+        if not bool_value(self.values.get(POST_REMOVE_T_KEY, "false")):
+            return result
+        try:
+            post_process_result = post_process_generated_files(self.values, self._base_dir())
+        except OSError as error:
+            return CommandResult(
+                result.command,
+                1,
+                f"{result.output}\n\nPost-process failed: {error}",
+            )
+        return CommandResult(
+            result.command,
+            result.return_code,
+            f"{result.output}\n\n{post_process_result.summary}",
+        )
 
     def _refresh_preview(self, _event):
         gcode_trace = None

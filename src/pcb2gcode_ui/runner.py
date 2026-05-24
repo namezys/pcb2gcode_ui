@@ -6,7 +6,13 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from pcb2gcode_ui.options import FILE_OPTIONS, OPTION_SPECS, bool_value, default_output_directory
+from pcb2gcode_ui.options import (
+    FILE_OPTIONS,
+    OPTION_SPECS,
+    UI_ONLY_OPTIONS,
+    bool_value,
+    default_output_directory,
+)
 
 LOGGER = logging.getLogger(__name__)
 PCB2GCODE_BINARY = "pcb2gcode"
@@ -42,6 +48,8 @@ def build_arguments(
 ) -> list[str]:
     args = ["--noconfigfile"]
     for spec in OPTION_SPECS:
+        if spec.key in UI_ONLY_OPTIONS:
+            continue
         value = values.get(spec.key, "").strip()
         if not value:
             continue

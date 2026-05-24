@@ -427,6 +427,18 @@ def load_gcode_trace(
     return GcodeTrace(segments, warnings, instruments, sources)
 
 
+def generated_output_paths(
+    values: dict[str, str],
+    base_dir: Path,
+    source_kinds: set[str] = None,
+) -> tuple[Path, ...]:
+    return tuple(
+        _output_path(values, option_key, base_dir)
+        for source_kind, option_key in OUTPUT_OPTIONS
+        if source_kinds is None or source_kind in source_kinds
+    )
+
+
 def gcode_trace_summary(trace: GcodeTrace) -> str:
     tools = ", ".join(trace.tools) if trace.tools else "none"
     return (

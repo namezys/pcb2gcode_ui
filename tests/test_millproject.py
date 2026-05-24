@@ -75,6 +75,10 @@ def test_no_g_and_no_m_options_are_cnc_options():
     }
 
 
+def test_post_process_option_is_post_process_option():
+    assert SPEC_BY_KEY["post-remove-t"].group == "Post-process"
+
+
 def test_format_millproject_stores_paths_relative_to_project_dir(tmp_path: Path):
     content = format_millproject(
         {
@@ -86,3 +90,10 @@ def test_format_millproject_stores_paths_relative_to_project_dir(tmp_path: Path)
 
     assert "front=board-F.Cu.gbr" in content
     assert "output-dir=nc" in content
+
+
+def test_format_millproject_writes_post_process_group():
+    content = format_millproject({"post-remove-t": "true"})
+
+    assert "# Post-process" in content
+    assert "post-remove-t=true" in content

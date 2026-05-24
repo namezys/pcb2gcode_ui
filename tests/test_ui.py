@@ -17,6 +17,7 @@ from pcb2gcode_ui.gcode_preview import (
 from pcb2gcode_ui.help_content import OPTION_HELP_BY_KEY
 from pcb2gcode_ui.millproject import parse_millproject
 from pcb2gcode_ui.options import SPEC_BY_KEY
+from pcb2gcode_ui.postprocess import PostProcessResult
 from pcb2gcode_ui.preview import PreviewResult, PreviewSide
 from pcb2gcode_ui.runner import CommandResult
 from pcb2gcode_ui.ui import MUTED_TEXT_COLOR, STALE_TEXT_COLOR, Pcb2GCodeApp
@@ -135,6 +136,15 @@ def test_app_build_constructs_initial_controls():
     assert page.title == "PCB2GCode UI"
     assert page.services
     assert page.controls
+
+
+def test_app_build_adds_post_process_tab_and_option():
+    app = Pcb2GCodeApp(FakePage())
+
+    app.build()
+
+    assert "Post-process" in app.group_controls
+    assert "post-remove-t" in app.controls
 
 
 def test_app_restores_last_working_directory(tmp_path: Path, monkeypatch):
@@ -443,6 +453,60 @@ def test_successful_generation_marks_current_settings_generated(monkeypatch):
 
     assert app.generated_values_snapshot == app.values
     assert app.generation_status.value == "NC: generated for current settings."
+
+
+def test_successful_generation_runs_enabled_post_process(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["post-remove-t"] = "true"
+    calls: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+
+    def fake_post_process(values, base_dir):
+        calls.append(dict(values))
+        return PostProcessResult(2, 1, 3)
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.post_process_generated_files", fake_post_process)
+
+    app._generate(None)
+
+    assert calls
+    assert "Post-process: commented T* lines in 1 file(s), 3 line(s)." in app.command_output.value
+    assert app.generated_values_snapshot == app.values
+
+
+def test_post_process_failure_does_not_mark_generated_current(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["post-remove-t"] = "true"
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+
+    def fake_post_process(_values, _base_dir):
+        raise OSError("cannot rewrite")
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.post_process_generated_files", fake_post_process)
+
+    app._generate(None)
+
+    assert app.generated_values_snapshot is None
+    assert "Post-process failed: cannot rewrite" in app.command_output.value
+    assert app.generation_status.value == "NC: not generated for current session."
 
 
 def test_editing_after_generation_marks_output_stale(monkeypatch):

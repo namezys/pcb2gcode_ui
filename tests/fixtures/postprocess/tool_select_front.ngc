@@ -1,0 +1,7 @@
+G21
+T1
+T12 M6
+T3M6
+M6
+(MSG, no tool select)
+G1 X1
