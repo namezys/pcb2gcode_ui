@@ -16,8 +16,9 @@ Supported state:
 - `M6` as a tool-change instruction for low-level parsing. Preview colors and the overlay table
   are collected by active tool id, so repeated `M6` commands for the same `Tn` stay in one tool
   path group.
-- pcb2gcode tool-change messages in the form
-  `(MSG, Change tool bit to mill diameter 0.50000mm)`. The preview reads only the tool type
+- pcb2gcode tool-change messages in forms such as
+  `(MSG, Change tool bit to mill diameter 0.50000mm)` and
+  `(MSG, Change tool bit to drill size 0.66mm)`. The preview reads only the tool type
   and diameter, attaches them to the next `M6`, and normalizes display-only trailing zeros
   such as `0.50000mm` to `0.5mm`.
 - Modal `G0`/`G1` movement, including coordinate-only continuation lines.

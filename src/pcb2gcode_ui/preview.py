@@ -64,6 +64,7 @@ GCODE_MIRROR_LINE_HALO_COLOR = (0, 0, 0, 210)
 GCODE_MIRROR_LINE_WIDTH_MM = 0.04
 GCODE_MIRROR_LINE_HALO_WIDTH_MM = 0.08
 GCODE_MIRROR_LINE_GAP_MM = 0.45
+DEFAULT_BACK_GCODE_SOURCE_KINDS = ("back",)
 
 
 class PreviewSide(StrEnum):
@@ -198,6 +199,7 @@ class TransformSettings:
     tile_y: int
     board_bounds: Bounds
     mirror_axis_mm: float = 0
+    back_gcode_source_kinds: tuple[str, ...] = DEFAULT_BACK_GCODE_SOURCE_KINDS
 
 
 class GerberPreviewRenderer:
@@ -715,7 +717,17 @@ def _transform_settings(values: dict[str, str], board_bounds: Bounds) -> Transfo
         tile_y=max(_int_value(values.get("tile-y", "1"), 1), 1),
         board_bounds=board_bounds,
         mirror_axis_mm=_length_mm(values.get("mirror-axis", "0"), metric),
+        back_gcode_source_kinds=_back_gcode_source_kinds(values),
     )
+
+
+def _back_gcode_source_kinds(values: dict[str, str]) -> tuple[str, ...]:
+    source_kinds = {"back"}
+    if values.get("cut-side", "").strip().lower() == "back":
+        source_kinds.add("outline")
+    if values.get("drill-side", "").strip().lower() == "back":
+        source_kinds.update(("drill", "milldrill"))
+    return tuple(sorted(source_kinds))
 
 
 def _transformed_bounds(
@@ -843,7 +855,7 @@ def _transform_layout_point(
 ) -> tuple[float, float]:
     x_base = x_value
     y_base = y_value
-    if mirror_back_source and kind == PreviewLayerKind.BACK:
+    if mirror_back_source and _is_back_gcode_source(kind, settings):
         if settings.mirror_yaxis:
             y_base = -y_base
         else:
@@ -851,6 +863,10 @@ def _transform_layout_point(
     if options.side == PreviewSide.BACK:
         x_base = -x_base
     return _transform_point(x_base, y_base, settings)
+
+
+def _is_back_gcode_source(kind: str, settings: TransformSettings) -> bool:
+    return kind in settings.back_gcode_source_kinds
 
 
 def _compose_preview(

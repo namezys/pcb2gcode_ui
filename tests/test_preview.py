@@ -29,7 +29,9 @@ from pcb2gcode_ui.preview import (
     _layer_color,
     _parse_drill_file,
     _tint_layer_image,
+    _transform_gcode_point,
     _transform_point,
+    _transform_settings,
     _transformed_bounds,
 )
 
@@ -1432,6 +1434,110 @@ def test_transformed_bounds_include_mirror_yaxis_back_gcode():
     assert bounds.max_y == 2
 
 
+def test_transform_settings_marks_cut_side_back_outline_gcode_as_back_side():
+    settings = _transform_settings(
+        {"cut-side": "back", "metric": "true"},
+        Bounds(0, 0, 10, 10),
+    )
+
+    assert _transform_gcode_point(2, 5, "outline", settings) == (-2, 5)
+
+
+def test_transform_settings_marks_drill_side_back_gcode_as_back_side():
+    settings = _transform_settings(
+        {"drill-side": "back", "metric": "true"},
+        Bounds(0, 0, 10, 10),
+    )
+
+    assert _transform_gcode_point(2, 5, "drill", settings) == (-2, 5)
+    assert _transform_gcode_point(2, 5, "milldrill", settings) == (-2, 5)
+
+
+def test_transform_settings_keeps_auto_side_gcode_unmirrored():
+    settings = _transform_settings(
+        {"cut-side": "auto", "drill-side": "auto", "metric": "true"},
+        Bounds(0, 0, 10, 10),
+    )
+
+    assert _transform_gcode_point(2, 5, "outline", settings) == (2, 5)
+    assert _transform_gcode_point(2, 5, "drill", settings) == (2, 5)
+    assert _transform_gcode_point(2, 5, "milldrill", settings) == (2, 5)
+
+
+def test_transform_settings_uses_y_mirror_for_back_side_drill_and_outline_gcode():
+    settings = _transform_settings(
+        {
+            "cut-side": "back",
+            "drill-side": "back",
+            "metric": "true",
+            "mirror-yaxis": "true",
+        },
+        Bounds(0, 0, 10, 10),
+    )
+
+    assert _transform_gcode_point(2, 5, "outline", settings) == (2, -5)
+    assert _transform_gcode_point(2, 5, "drill", settings) == (2, -5)
+    assert _transform_gcode_point(2, 5, "milldrill", settings) == (2, -5)
+
+
+def test_transformed_bounds_include_cut_side_back_outline_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(2, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "outline",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(
+        Bounds(0, 0, 2, 10),
+        back_gcode_source_kinds=("back", "outline"),
+    )
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds.min_x == -6
+    assert bounds.max_x == 2
+
+
+def test_transformed_bounds_include_drill_side_back_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(2, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "drill",
+                1,
+            ),
+            GcodeSegment(
+                GcodePoint(3, 5, -0.1),
+                GcodePoint(4, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "milldrill",
+                2,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(
+        Bounds(0, 0, 4, 10),
+        back_gcode_source_kinds=("back", "drill", "milldrill"),
+    )
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds.min_x == -6
+    assert bounds.max_x == 2
+
+
 def test_transformed_bounds_include_empty_gcode_source_axis():
     trace = GcodeTrace([], [], [], [GcodeSource("front", "front.nc")])
     settings = _preview_settings(Bounds(0, 0, 4, 4))
@@ -1874,6 +1980,7 @@ def _preview_settings(
     bounds: Bounds,
     mirror_yaxis: bool = False,
     mirror_axis_mm: float = 0,
+    back_gcode_source_kinds: tuple[str, ...] = ("back",),
 ) -> TransformSettings:
     return TransformSettings(
         metric=True,
@@ -1885,4 +1992,5 @@ def _preview_settings(
         tile_y=1,
         board_bounds=bounds,
         mirror_axis_mm=mirror_axis_mm,
+        back_gcode_source_kinds=back_gcode_source_kinds,
     )

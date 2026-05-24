@@ -102,6 +102,31 @@ def test_interpreter_reads_tool_parameters_from_same_line_comment():
     assert gcode_tool_parameters_label(trace, "drill:4") == "drill 1mm"
 
 
+def test_interpreter_reads_drill_size_tool_parameter_comment_before_m6():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "G00 Z15.00000 (Retract)",
+                "T3",
+                "M5      (Spindle stop.)",
+                "G04 P1.00000",
+                "(MSG, Change tool bit to drill size 0.66mm)",
+                "M6      (Tool change.)",
+                "M0      (Temporary machine stop.)",
+                "M3      (Spindle on clockwise.)",
+                "G0 Z2.00000",
+                "G04 P1.00000",
+                "G1 X1 Z-0.1",
+            ]
+        ),
+        "drill",
+    )
+
+    expected_parameters = GcodeToolParameters("drill", "0.66mm")
+    assert GcodeInstrument("drill-1", "3", "drill", 1, 6, expected_parameters) in trace.instruments
+    assert gcode_tool_parameters_label(trace, "drill:3") == "drill 0.66mm"
+
+
 def test_interpreter_consumes_tool_parameters_once():
     trace = GcodeInterpreter().parse(
         "\n".join(

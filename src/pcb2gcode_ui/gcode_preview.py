@@ -22,7 +22,7 @@ COORDINATE_ONLY_RE = re.compile(r"^\s*[XYZFIJKR][+-]?\d", re.IGNORECASE)
 TOOL_PARAMETER_RE = re.compile(
     r"Change\s+tool\s+bit\s+to\s+"
     r"(?P<tool_type>[A-Za-z][A-Za-z0-9_-]*)\s+"
-    r"diameter\s+"
+    r"(?:diameter|size)\s+"
     r"(?P<diameter>[+-]?\d+(?:\.\d+)?\s*[A-Za-z]*)",
     re.IGNORECASE,
 )
