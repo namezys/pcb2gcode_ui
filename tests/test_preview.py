@@ -120,6 +120,7 @@ def test_compose_preview_places_layers_in_shared_coordinate_system():
     settings = TransformSettings(
         metric=True,
         zero_start=False,
+        mirror_yaxis=False,
         x_offset_mm=0,
         y_offset_mm=0,
         tile_x=1,
@@ -541,6 +542,29 @@ def test_compose_preview_draws_back_gcode_axis_mirrored_from_origin():
     assert image.getpixel((30, 50))[:3] == (210, 216, 222)
 
 
+def test_compose_preview_draws_back_gcode_axis_flipped_y_when_enabled():
+    trace = GcodeTrace([], [], [], [GcodeSource("back", "back.nc")])
+    settings = _preview_settings(Bounds(0, 0, 4, 4), mirror_yaxis=True)
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-1, -5, 5, 1),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((30, 10))[:3] == (210, 216, 222)
+    assert image.getpixel((10, 30))[:3] == (210, 216, 222)
+
+
 def test_compose_preview_mirrors_back_gcode_axis_on_back_side():
     trace = GcodeTrace([], [], [], [GcodeSource("back", "back.nc")])
     settings = _preview_settings(Bounds(0, 0, 4, 4))
@@ -585,7 +609,7 @@ def test_compose_preview_scales_gcode_axis_from_largest_trace_size():
     image = _compose_preview(
         [],
         None,
-        Bounds(-1, -1, 101, 27),
+        Bounds(-1, -1, 101, 14.5),
         settings,
         PreviewOptions(
             show_front=False,
@@ -597,7 +621,7 @@ def test_compose_preview_scales_gcode_axis_from_largest_trace_size():
         trace,
     )
 
-    assert image.getpixel((1, 10))[:3] == (210, 216, 222)
+    assert image.getpixel((1, 2))[:3] == (210, 216, 222)
 
 
 def test_compose_preview_draws_gcode_paths_over_axis():
@@ -713,6 +737,41 @@ def test_compose_preview_mirrors_back_gcode_on_front_side():
     assert image.getpixel((1, 5))[:3] != (32, 35, 38)
 
 
+def test_compose_preview_flips_back_gcode_y_axis_when_enabled():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(2, 3, -0.1),
+                GcodePoint(4, 3, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_yaxis=True)
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(0, -10, 10, 10),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((3, 13))[:3] != (32, 35, 38)
+    assert image.getpixel((7, 7))[:3] == (32, 35, 38)
+
+
 def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
     trace = GcodeTrace(
         [
@@ -748,6 +807,42 @@ def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
     assert image.getpixel((10, 5))[:3] != (32, 35, 38)
 
 
+def test_compose_preview_back_side_uses_mirror_yaxis_back_gcode_layout():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(2, 3, -0.1),
+                GcodePoint(4, 3, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 10, 10), mirror_yaxis=True)
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(0, -10, 10, 10),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((7, 13))[:3] != (32, 35, 38)
+    assert image.getpixel((3, 13))[:3] == (32, 35, 38)
+
+
 def test_transformed_bounds_include_origin_mirrored_back_gcode():
     trace = GcodeTrace(
         [
@@ -768,6 +863,28 @@ def test_transformed_bounds_include_origin_mirrored_back_gcode():
 
     assert bounds.min_x == -6
     assert bounds.max_x == 2
+
+
+def test_transformed_bounds_include_mirror_yaxis_back_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(2, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 2, 10), mirror_yaxis=True)
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds.min_y == -7
+    assert bounds.max_y == 2
 
 
 def test_transformed_bounds_include_empty_gcode_source_axis():
@@ -800,7 +917,7 @@ def test_transformed_bounds_scale_gcode_axis_from_largest_trace_size():
 
     bounds = _transformed_bounds([], None, settings, trace)
 
-    assert bounds.max_y == 27
+    assert bounds.max_y == 14.5
 
 
 def test_render_preview_size_stays_stable_when_gcode_is_hidden():
@@ -865,6 +982,7 @@ def test_compose_preview_does_not_mirror_back_layer():
     settings = TransformSettings(
         metric=True,
         zero_start=False,
+        mirror_yaxis=False,
         x_offset_mm=0,
         y_offset_mm=0,
         tile_x=1,
@@ -1079,6 +1197,7 @@ def test_transform_point_applies_zero_start_offsets():
     settings = TransformSettings(
         metric=True,
         zero_start=True,
+        mirror_yaxis=False,
         x_offset_mm=1,
         y_offset_mm=2,
         tile_x=1,
@@ -1089,10 +1208,11 @@ def test_transform_point_applies_zero_start_offsets():
     assert _transform_point(6, 12, settings) == (2, 4)
 
 
-def _preview_settings(bounds: Bounds) -> TransformSettings:
+def _preview_settings(bounds: Bounds, mirror_yaxis: bool = False) -> TransformSettings:
     return TransformSettings(
         metric=True,
         zero_start=False,
+        mirror_yaxis=mirror_yaxis,
         x_offset_mm=0,
         y_offset_mm=0,
         tile_x=1,

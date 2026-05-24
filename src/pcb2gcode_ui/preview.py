@@ -55,7 +55,7 @@ GCODE_RETRACT_ALPHA = 175
 GCODE_RETRACT_WIDTH_MM = 0.05
 GCODE_RETRACT_GAP_MM = 0.18
 GCODE_AXIS_MIN_LENGTH_MM = 4.0
-GCODE_AXIS_MAX_LENGTH_RATIO = 0.25
+GCODE_AXIS_MAX_LENGTH_RATIO = 0.125
 GCODE_AXIS_LABEL_STEP_PX = 120
 GCODE_AXIS_FONT_SIZE = 110
 GCODE_AXIS_COLOR = (210, 216, 222, 230)
@@ -187,6 +187,7 @@ class GerberSegment:
 class TransformSettings:
     metric: bool
     zero_start: bool
+    mirror_yaxis: bool
     x_offset_mm: float
     y_offset_mm: float
     tile_x: int
@@ -704,6 +705,7 @@ def _transform_settings(values: dict[str, str], board_bounds: Bounds) -> Transfo
     return TransformSettings(
         metric=metric,
         zero_start=_preview_bool(values.get("zero-start", "false")),
+        mirror_yaxis=_preview_bool(values.get("mirror-yaxis", "false")),
         x_offset_mm=_length_mm(values.get("x-offset", "0"), metric),
         y_offset_mm=_length_mm(values.get("y-offset", "0"), metric),
         tile_x=max(_int_value(values.get("tile-x", "1"), 1), 1),
@@ -1087,7 +1089,10 @@ def _transform_gcode_point(
 ) -> tuple[float, float]:
     transformed_x, transformed_y = _transform_point(x_value, y_value, settings)
     if source_kind == PreviewLayerKind.BACK:
-        transformed_x = -transformed_x
+        if settings.mirror_yaxis:
+            transformed_y = -transformed_y
+        else:
+            transformed_x = -transformed_x
     return transformed_x, transformed_y
 
 

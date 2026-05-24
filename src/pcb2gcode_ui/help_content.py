@@ -884,8 +884,9 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "Mirror Y axis",
         "bool/flag-like, default unspecified by current docs",
         "Changes mirror dimension.",
-        "Current man page says this flips along Y instead. Exact composition with `mirror-axis` "
-        "is underexplained, so verify emitted back-side coordinates before cutting.",
+        "Flips the back side along Y instead of X. This also affects preview: back-side NC "
+        "toolpaths are flipped vertically instead of horizontally, including when the Back "
+        "preview side is selected.",
         (SOURCE_MAN, SOURCE_ALIGNMENT, SOURCE_DETAIL_HELP),
     ),
 }

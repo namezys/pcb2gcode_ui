@@ -22,7 +22,7 @@ def test_high_risk_help_entries_include_gotchas():
         "zsafe": ("safety-critical", "clamps"),
         "nog81": ("GRBL", "G0"),
         "zero-start": ("mismatch", "separate runs"),
-        "mirror-yaxis": ("underexplained", "verify"),
+        "mirror-yaxis": ("back side", "y instead of x"),
         "bridges": ("holding tab", "attached"),
         "software": ("custom", "probe"),
     }
