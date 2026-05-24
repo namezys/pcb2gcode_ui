@@ -4,6 +4,7 @@ from pathlib import Path
 
 import flet as ft
 
+from pcb2gcode_ui.app_state import load_last_directory, save_last_directory
 from pcb2gcode_ui.gcode_preview import (
     GcodeToolPath,
     GcodeTrace,
@@ -92,7 +93,7 @@ class Pcb2GCodeApp:
         self.values = default_values()
         self.controls: dict[str, ft.Control] = {}
         self.current_millproject: Path = None
-        self.working_directory = Path.cwd()
+        self.working_directory = load_last_directory()
         self.file_picker = ft.FilePicker()
         self.other_layer_picker = ft.FilePicker()
         self.directory_picker = ft.FilePicker()
@@ -963,6 +964,7 @@ class Pcb2GCodeApp:
 
     def _set_working_directory(self, path: Path):
         self.working_directory = path
+        save_last_directory(path)
 
     def _configure_window(self):
         window = getattr(self.page, "window", None)

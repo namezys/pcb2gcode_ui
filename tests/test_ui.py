@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -127,6 +128,35 @@ def test_app_build_constructs_initial_controls():
     assert page.title == "PCB2GCode UI"
     assert page.services
     assert page.controls
+
+
+def test_app_restores_last_working_directory(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    last_directory = tmp_path / "last"
+    last_directory.mkdir()
+    state_file.write_text(
+        json.dumps({"last_directory": str(last_directory)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+
+    app = Pcb2GCodeApp(FakePage())
+
+    assert app.working_directory == last_directory
+
+
+def test_set_working_directory_persists_last_directory(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    last_directory = tmp_path / "last"
+    last_directory.mkdir()
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    app = Pcb2GCodeApp(FakePage())
+
+    app._set_working_directory(last_directory)
+
+    assert json.loads(state_file.read_text(encoding="utf-8")) == {
+        "last_directory": str(last_directory)
+    }
 
 
 def test_open_file_awaits_picker_and_loads_millproject(tmp_path: Path):
