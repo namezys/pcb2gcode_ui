@@ -25,10 +25,9 @@ def test_validate_values_rejects_fixed_feed_direction_with_tsp():
     assert [message.key for message in messages] == ["mill-feed-direction"]
 
 
-def test_validate_values_requires_align_drill_diameter_when_enabled_with_drill():
+def test_validate_values_requires_align_drill_options_when_enabled():
     messages = validate_values(
         {
-            "drill": "drill.drl",
             "outline": "outline.gbr",
             "zsafe": "5",
             "zchange": "10",
@@ -44,7 +43,10 @@ def test_validate_values_requires_align_drill_diameter_when_enabled_with_drill()
         }
     )
 
-    assert [message.key for message in messages] == ["pre-align-drill-diameter"]
+    assert [message.key for message in messages] == [
+        "pre-align-drill-diameter",
+        "pre-align-drill-depth",
+    ]
 
 
 def test_validate_values_rejects_non_positive_align_drill_diameter():
@@ -64,7 +66,48 @@ def test_validate_values_rejects_non_positive_align_drill_diameter():
             "cut-infeed": "0.5",
             "pre-align-drills": "true",
             "pre-align-drill-diameter": "0",
+            "pre-align-drill-depth": "-1",
         }
     )
 
     assert [message.text for message in messages] == ["Value must be positive."]
+
+
+def test_validate_values_rejects_invalid_align_drill_depth():
+    messages = validate_values(
+        {
+            "outline": "outline.gbr",
+            "zsafe": "5",
+            "zchange": "10",
+            "zcut": "-1",
+            "cutter-diameter": "1",
+            "cut-feed": "100",
+            "cut-speed": "1000",
+            "cut-infeed": "0.5",
+            "pre-align-drills": "true",
+            "pre-align-drill-diameter": "0.5mm",
+            "pre-align-drill-depth": "bottom",
+        }
+    )
+
+    assert [message.key for message in messages] == ["pre-align-drill-depth"]
+
+
+def test_validate_values_rejects_zero_align_drill_depth():
+    messages = validate_values(
+        {
+            "outline": "outline.gbr",
+            "zsafe": "5",
+            "zchange": "10",
+            "zcut": "-1",
+            "cutter-diameter": "1",
+            "cut-feed": "100",
+            "cut-speed": "1000",
+            "cut-infeed": "0.5",
+            "pre-align-drills": "true",
+            "pre-align-drill-diameter": "0.5mm",
+            "pre-align-drill-depth": "0",
+        }
+    )
+
+    assert [message.text for message in messages] == ["Value must be non-zero."]

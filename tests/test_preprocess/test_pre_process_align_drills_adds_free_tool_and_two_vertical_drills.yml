@@ -2,9 +2,7 @@ content: 'M48
 
   METRIC,TZ
 
-  T01C0.8
-
-  T02C0.500
+  T01C0.500
 
   %
 
@@ -12,20 +10,15 @@ content: 'M48
 
   T01
 
-  X10Y20
-
-  T02
-
   X20Y19.5
 
   X20Y40.5
-
-  T0
 
   M30
 
   '
 output_files:
-- basic_metric.pcb2gcode-ui-align-drills.drl
+- pcb2gcode-ui-align-drills.drl
 processed_files: 1
-values_drill: basic_metric.pcb2gcode-ui-align-drills.drl
+values_align_source: pcb2gcode-ui-align-drills.drl
+values_drill: basic_metric.drl

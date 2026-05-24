@@ -82,7 +82,13 @@ def test_post_process_option_is_post_process_option():
 def test_pre_process_options_are_pre_process_options():
     assert {
         SPEC_BY_KEY[key].group
-        for key in ("pre-align-drills", "pre-align-drill-diameter")
+        for key in (
+            "pre-align-drills",
+            "pre-align-drill-diameter",
+            "pre-align-drill-depth",
+            "pre-align-drill-output",
+            "pre-align-drill-source",
+        )
     } == {"Pre-process"}
 
 
@@ -111,9 +117,11 @@ def test_format_millproject_writes_pre_process_group():
         {
             "pre-align-drills": "true",
             "pre-align-drill-diameter": "0.5mm",
+            "pre-align-drill-depth": "-1mm",
         }
     )
 
     assert "# Pre-process" in content
     assert "pre-align-drills=true" in content
     assert "pre-align-drill-diameter=0.5mm" in content
+    assert "pre-align-drill-depth=-1mm" in content

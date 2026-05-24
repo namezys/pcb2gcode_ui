@@ -11,7 +11,14 @@ OUTPUT_FILE_OPTIONS = {
     "milldrill-output",
     "outline-output",
 }
-UI_ONLY_OPTIONS = {"pre-align-drills", "pre-align-drill-diameter", "post-remove-t"}
+UI_ONLY_OPTIONS = {
+    "pre-align-drills",
+    "pre-align-drill-diameter",
+    "pre-align-drill-depth",
+    "pre-align-drill-output",
+    "pre-align-drill-source",
+    "post-remove-t",
+}
 
 
 @dataclass(frozen=True)
@@ -335,6 +342,28 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "Align drill diameter",
         "number",
         "Diameter for the generated alignment drill.",
+    ),
+    OptionSpec(
+        "pre-align-drill-depth",
+        "Pre-process",
+        "Align drill depth",
+        "number",
+        "Depth for the separated alignment drill NC file.",
+    ),
+    OptionSpec(
+        "pre-align-drill-output",
+        "Pre-process",
+        "Align drill output",
+        "text",
+        "Output file for separated alignment drill NC.",
+        "align-drill.ngc",
+    ),
+    OptionSpec(
+        "pre-align-drill-source",
+        "Pre-process",
+        "Align drill source",
+        "text",
+        "Generated Excellon source for separated alignment holes.",
     ),
     OptionSpec(
         "post-remove-t",

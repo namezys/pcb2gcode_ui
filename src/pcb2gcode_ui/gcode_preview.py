@@ -32,6 +32,7 @@ OUTPUT_OPTIONS = (
     ("front", "front-output"),
     ("back", "back-output"),
     ("drill", "drill-output"),
+    ("align-drill", "pre-align-drill-output"),
     ("milldrill", "milldrill-output"),
     ("outline", "outline-output"),
 )
@@ -654,6 +655,7 @@ def _default_output_name(option_key: str) -> str:
         "front-output": "front.ngc",
         "back-output": "back.ngc",
         "drill-output": "drill.ngc",
+        "pre-align-drill-output": "align-drill.ngc",
         "milldrill-output": "milldrill.ngc",
         "outline-output": "outline.ngc",
     }

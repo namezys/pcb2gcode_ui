@@ -73,10 +73,13 @@ filename options:
 - `front-output`
 - `back-output`
 - `drill-output`
+- `pre-align-drill-output`
 - `milldrill-output`
 - `outline-output`
 
-Missing files are reported as preview warnings and do not block Gerber preview.
+Missing files are reported as preview warnings and do not block Gerber preview. The alignment
+drill output is loaded only when its NC checkbox is selected and align drills are enabled or an
+alignment drill source has been generated.
 
 ## Limitations
 

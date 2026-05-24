@@ -103,8 +103,13 @@ PREVIEW_COLOR_LEGEND: tuple[PreviewColorLegendEntry, ...] = (
     PreviewColorLegendEntry("Back G-code cuts", "#FF6987", "Cutting moves from back NC output."),
     PreviewColorLegendEntry("Drill G-code cuts", "#5AD2FF", "Cutting moves from drill NC output."),
     PreviewColorLegendEntry(
-        "Milldrill G-code cuts",
+        "Align drill G-code cuts",
         "#96B9FF",
+        "Cutting moves from separated alignment drill NC output.",
+    ),
+    PreviewColorLegendEntry(
+        "Milldrill G-code cuts",
+        "#60D394",
         "Cutting moves from milldrill NC output.",
     ),
     PreviewColorLegendEntry("Outline G-code cuts", "#FFFFFF", "Cutting moves from outline NC."),
@@ -224,11 +229,10 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "pre-align-drills",
         "Align drills",
         "bool, default `false`",
-        "Writes a generated drill input copy before pcb2gcode runs.",
+        "Generates a separated alignment drill source and NC output.",
         "UI-only pre-processing step. When enabled, the original Excellon drill file stays "
-        "unchanged. The UI writes a clearly named processed drill file into the output "
-        "directory, adds a free tool, and adds two drill hits outside the generated cutoff "
-        "bounds on the computed mirror line. This requires an outline/cutoff file.",
+        "unchanged. The UI writes a two-hole generated drill source into the output directory "
+        "and then runs a separated front-side drill command for that source.",
         (SOURCE_LOCAL_UI,),
     ),
     "pre-align-drill-diameter": _entry(
@@ -236,9 +240,37 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "Align drill diameter",
         "length, no default",
         "Sets the diameter for the generated alignment-drill tool.",
-        "Required when Align drills is enabled and a drill file is selected. Use a real bit "
-        "diameter accepted by the machine, for example `0.8mm` or `0.031in`. Values without "
-        "a suffix follow the Metric input setting.",
+        "Required when Align drills is enabled. Use a real bit diameter accepted by the "
+        "machine, for example `0.8mm` or `0.031in`. Values without a suffix follow the Metric "
+        "input setting.",
+        (SOURCE_LOCAL_UI,),
+    ),
+    "pre-align-drill-depth": _entry(
+        "pre-align-drill-depth",
+        "Align drill depth",
+        "length, no default",
+        "Sets the depth for the separated alignment drill NC file.",
+        "Required when Align drills is enabled. Enter the depth magnitude; positive values are "
+        "converted to negative drilling Z for the separated front-side alignment drill run.",
+        (SOURCE_LOCAL_UI,),
+    ),
+    "pre-align-drill-output": _entry(
+        "pre-align-drill-output",
+        "Align drill output",
+        "path, default `align-drill.ngc`",
+        "Names the separated alignment drill NC output file.",
+        "UI-only option used to run the alignment drill source separately from the main drill "
+        "file. The output is generated explicitly on the front side and uses the calculated "
+        "alignment offsets.",
+        (SOURCE_LOCAL_UI,),
+    ),
+    "pre-align-drill-source": _entry(
+        "pre-align-drill-source",
+        "Align drill source",
+        "path, generated",
+        "Shows the generated two-hole Excellon alignment source.",
+        "Pre-processing fills this field with the generated source path. Existing arbitrary "
+        "paths are replaced by the generated path instead of being overwritten.",
         (SOURCE_LOCAL_UI,),
     ),
     "single-thread": _entry(

@@ -40,9 +40,11 @@ from pcb2gcode_ui.options import (
 )
 from pcb2gcode_ui.postprocess import POST_REMOVE_T_KEY, post_process_generated_files
 from pcb2gcode_ui.preprocess import (
+    PRE_ALIGN_DRILL_SOURCE_KEY,
     PRE_ALIGN_DRILLS_KEY,
     AlignDrillsPlan,
     PreProcessResult,
+    align_drill_generation_values,
     align_drills_plan,
     pre_process_input_files,
 )
@@ -158,6 +160,7 @@ class Pcb2GCodeApp:
         self.preview_gcode_front = self._gcode_checkbox("Front")
         self.preview_gcode_back = self._gcode_checkbox("Back")
         self.preview_gcode_drill = self._gcode_checkbox("Drill")
+        self.preview_gcode_align = self._gcode_checkbox("Align")
         self.preview_gcode_milldrill = self._gcode_checkbox("Milldrill")
         self.preview_gcode_outline = self._gcode_checkbox("Outline")
         self.preview_alpha = ft.Slider(
@@ -398,6 +401,7 @@ class Pcb2GCodeApp:
                         self.preview_gcode_front,
                         self.preview_gcode_back,
                         self.preview_gcode_drill,
+                        self.preview_gcode_align,
                         self.preview_gcode_milldrill,
                         self.preview_gcode_outline,
                     ],
@@ -935,6 +939,12 @@ class Pcb2GCodeApp:
                 CommandResult(["pre-process"], 1, f"Pre-process failed: {error}")
             )
             return
+        if pre_process_result.values.get(PRE_ALIGN_DRILL_SOURCE_KEY, "").strip():
+            self._set_value(
+                PRE_ALIGN_DRILL_SOURCE_KEY,
+                pre_process_result.values[PRE_ALIGN_DRILL_SOURCE_KEY],
+                mark_generated_stale=False,
+            )
         validation_result = validate_with_binary(
             pre_process_result.values,
             base_dir=self._base_dir(),
@@ -949,6 +959,15 @@ class Pcb2GCodeApp:
         )
         generation_result = self._with_pre_process_summary(generation_result, pre_process_result)
         if generation_result.ok:
+            align_generation_result = self._generate_align_drill_nc(
+                generation_result,
+                pre_process_result,
+            )
+            if not align_generation_result.ok:
+                self._set_command_result(align_generation_result)
+                return
+            generation_result = align_generation_result
+        if generation_result.ok:
             generation_result = self._post_process_generation_result(generation_result)
         self._set_command_result(generation_result)
         if generation_result.ok:
@@ -956,6 +975,28 @@ class Pcb2GCodeApp:
             self._reset_gcode_preview_after_generation()
             self._update_generation_status()
             self.page.update()
+
+    def _generate_align_drill_nc(
+        self,
+        generation_result: CommandResult,
+        pre_process_result: PreProcessResult,
+    ) -> CommandResult:
+        if not bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false")):
+            return generation_result
+        if not pre_process_result.processed_files:
+            return generation_result
+        align_values = align_drill_generation_values(pre_process_result.values)
+        result = generate_nc_files(align_values, base_dir=self._base_dir())
+        output = "\n\n".join(
+            item
+            for item in (
+                generation_result.output,
+                "Alignment drill NC (front side):",
+                result.output,
+            )
+            if item
+        )
+        return CommandResult(result.command, result.return_code, output)
 
     def _post_process_generation_result(self, result: CommandResult) -> CommandResult:
         if not bool_value(self.values.get(POST_REMOVE_T_KEY, "false")):
@@ -992,7 +1033,6 @@ class Pcb2GCodeApp:
     def _align_drills_enabled(self) -> bool:
         return (
             bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false"))
-            and bool(self.values.get("drill", "").strip())
             and bool(self.values.get("outline", "").strip())
         )
 
@@ -1085,13 +1125,10 @@ class Pcb2GCodeApp:
             ft.Text("NC tools", color=TEXT_COLOR, size=BODY_TEXT_SIZE),
             _instrument_overlay_header(),
         ]
-        previous_source_label = ""
         for visible_idx, (idx, tool_path, bit_label, cut_count, retract_count) in enumerate(
             visible_instruments,
             start=1,
         ):
-            if previous_source_label != tool_path.source_label:
-                rows.append(_instrument_overlay_separator(tool_path.source_label))
             rows.append(
                 _instrument_overlay_row(
                     color=gcode_instrument_color(idx),
@@ -1102,7 +1139,6 @@ class Pcb2GCodeApp:
                     retract_count=retract_count,
                 )
             )
-            previous_source_label = tool_path.source_label
         self.gcode_instrument_overlay.content = ft.Column(rows, spacing=4)
         self.gcode_instrument_overlay.visible = True
         self._apply_gcode_instrument_overlay_position()
@@ -1134,11 +1170,18 @@ class Pcb2GCodeApp:
             selected.add("back")
         if self.preview_gcode_drill.value:
             selected.add("drill")
+        if self.preview_gcode_align.value and self._align_drill_preview_enabled():
+            selected.add("align-drill")
         if self.preview_gcode_milldrill.value:
             selected.add("milldrill")
         if self.preview_gcode_outline.value:
             selected.add("outline")
         return selected
+
+    def _align_drill_preview_enabled(self) -> bool:
+        return bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false")) or bool(
+            self.values.get(PRE_ALIGN_DRILL_SOURCE_KEY, "").strip()
+        )
 
     def _show_validation_messages(self, messages: list[ValidationMessage]):
         for control in self.controls.values():
@@ -1364,15 +1407,6 @@ def _instrument_overlay_row(
         ],
         spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-
-
-def _instrument_overlay_separator(label: str) -> ft.Container:
-    return ft.Container(
-        content=ft.Text(label, color=TEXT_COLOR, size=SMALL_TEXT_SIZE),
-        padding=ft.Padding(left=0, top=4, right=0, bottom=2),
-        border=ft.Border(bottom=ft.BorderSide(width=1, color=OUTLINE_COLOR)),
-        width=INSTRUMENT_OVERLAY_WIDTH - 16,
     )
 
 

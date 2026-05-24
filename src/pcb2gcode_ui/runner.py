@@ -107,11 +107,27 @@ def run_command(command: list[str], cwd: Path) -> CommandResult:
         command,
         cwd=cwd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
         check=False,
     )
-    return CommandResult(command=command, return_code=process.returncode, output=process.stdout)
+    LOGGER.debug("Command finished with return code %s", process.returncode)
+    if process.stdout:
+        LOGGER.debug("Command stdout:\n%s", process.stdout.rstrip())
+    if process.stderr:
+        LOGGER.debug("Command stderr:\n%s", process.stderr.rstrip())
+    return CommandResult(
+        command=command,
+        return_code=process.returncode,
+        output=_combined_output(process.stdout, process.stderr),
+    )
+
+
+def _combined_output(stdout: str, stderr: str) -> str:
+    if stdout and stderr:
+        separator = "" if stdout.endswith("\n") else "\n"
+        return f"{stdout}{separator}{stderr}"
+    return stdout or stderr
 
 
 def _resolve_path(value: str, base_dir: Path = None) -> Path:

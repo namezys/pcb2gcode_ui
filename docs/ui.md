@@ -77,7 +77,8 @@ small local movement interpreter. It draws only linear `G0`/`G1` traces: a segme
 either endpoint has `Z < 0`; otherwise it is a retract/travel move. Cut lines are solid;
 retract/travel lines are dotted. The preview colors paths by active tool id per NC file and
 mirrors back NC output the same way as the back Gerber layer. It overlays a tool table for active
-NC files. Each loaded NC file also gets its own origin axis with labeled positive X and Y
+NC files, including separated alignment drill output when align drills are enabled. Each loaded
+NC file also gets its own origin axis with labeled positive X and Y
 directions. The preview bounds are calculated from all configured Gerber/drill/Aux files and
 loaded NC files, so toggling layer checkboxes does not resize the image. The tool table labels
 each NC file group and omits tools that contain only pass/retract moves. See
@@ -95,4 +96,6 @@ root because `pcb2gcode` can still write SVG preview files when NC export is dis
 Generation always runs validation first. The app passes parameters directly to the installed
 `pcb2gcode` binary and sets `--output-dir` to the selected directory. Standard output file
 parameters such as `front-output`, `back-output`, `drill-output`, `milldrill-output`, and
-`outline-output` control the generated NC filenames.
+`outline-output` control the generated NC filenames. When Align drills is enabled, the UI also
+writes `pre-align-drill-source` and generates `pre-align-drill-output` with a separated front-side
+drill run that uses the calculated alignment offsets.

@@ -366,6 +366,25 @@ def test_load_gcode_trace_reads_configured_output_files(tmp_path: Path):
     assert any("Missing back NC file" in warning for warning in trace.warnings)
 
 
+def test_load_gcode_trace_reads_align_drill_output(tmp_path: Path):
+    output_dir = tmp_path / "nc"
+    output_dir.mkdir()
+    align_path = output_dir / "align-drill.nc"
+    align_path.write_text("G21\nT1 M6\nG0 X0 Y0 Z1\nG1 Z-0.1\n", encoding="utf-8")
+
+    trace = load_gcode_trace(
+        {
+            "output-dir": str(output_dir),
+            "pre-align-drill-output": "align-drill.nc",
+        },
+        tmp_path,
+        {"align-drill"},
+    )
+
+    assert {segment.source_kind for segment in trace.segments} == {"align-drill"}
+    assert trace.sources == [GcodeSource("align-drill", "align-drill.nc")]
+
+
 def test_trace_filter_keeps_requested_source_only():
     trace = GcodeInterpreter().parse("G21\nG1 X1 Z-0.1\n", "front")
     other = GcodeInterpreter().parse("G21\nG1 X2 Z-0.1\n", "back")

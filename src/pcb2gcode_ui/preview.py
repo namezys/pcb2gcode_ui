@@ -1244,15 +1244,6 @@ def _draw_gcode_axis(
     )
     _draw_axis_label(draw, "X+", origin, x_end, font)
     _draw_axis_label(draw, "Y+", origin, y_end, font)
-    draw.text(
-        (
-            origin[0] + GCODE_AXIS_FONT_SIZE * 0.45,
-            origin[1] + GCODE_AXIS_FONT_SIZE * 0.45 + idx * GCODE_AXIS_LABEL_STEP_PX,
-        ),
-        source.label,
-        fill=GCODE_AXIS_LABEL_COLOR,
-        font=font,
-    )
 
 
 def _draw_axis_label(

@@ -88,6 +88,8 @@ def _active_source_kinds(values: dict[str, str]) -> set[str]:
             source_kinds.add(source_kind)
     if values.get("drill", "").strip() and _milldrill_enabled(values):
         source_kinds.add("milldrill")
+    if values.get("pre-align-drill-source", "").strip():
+        source_kinds.add("align-drill")
     return source_kinds
 
 

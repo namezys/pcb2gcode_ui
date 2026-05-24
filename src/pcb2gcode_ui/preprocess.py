@@ -1,21 +1,42 @@
 import logging
-import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from pcb2gcode_ui.gcode_preview import GcodeBounds
-from pcb2gcode_ui.options import bool_value
+from pcb2gcode_ui.options import bool_value, default_values
 
 LOGGER = logging.getLogger(__name__)
 PRE_ALIGN_DRILLS_KEY = "pre-align-drills"
 PRE_ALIGN_DRILL_DIAMETER_KEY = "pre-align-drill-diameter"
-PROCESSED_DRILL_SUFFIX = ".pcb2gcode-ui-align-drills"
+PRE_ALIGN_DRILL_DEPTH_KEY = "pre-align-drill-depth"
+PRE_ALIGN_DRILL_OUTPUT_KEY = "pre-align-drill-output"
+PRE_ALIGN_DRILL_SOURCE_KEY = "pre-align-drill-source"
+ALIGN_DRILL_OUTPUT_DEFAULT = "align-drill.ngc"
+ALIGN_DRILL_SOURCE_NAME = "pcb2gcode-ui-align-drills.drl"
 UNIT_MM = "mm"
 UNIT_INCH = "inch"
 INCH_TO_MM = 25.4
-TOOL_RE = re.compile(r"^\s*T(?P<id>\d+)(?:C(?P<diameter>[+-]?\d+(?:\.\d+)?))?\b")
-TRAILING_COMMANDS = {"T0", "M30"}
+ALIGN_DRILL_PASSTHROUGH_KEYS = (
+    "ignore-warnings",
+    "metric",
+    "metricoutput",
+    "output-dir",
+    "sanity-checks",
+    "single-thread",
+    "zsafe",
+    "spinup-time",
+    "spindown-time",
+    "zchange",
+    "zchange-absolute",
+    "nog64",
+    "nog91-1",
+    "nog81",
+    "nom6",
+    "drill-feed",
+    "drill-speed",
+    "x-offset",
+    "y-offset",
+)
 
 
 @dataclass(frozen=True)
@@ -48,23 +69,38 @@ def pre_process_input_files(
     command_values = dict(values)
     if (
         not _enabled(values, PRE_ALIGN_DRILLS_KEY)
-        or not values.get("drill", "").strip()
         or not values.get("outline", "").strip()
         or not align_drills_plan
     ):
         return PreProcessResult(command_values, 0, ())
 
-    source_path = _resolve_path(values["drill"], base_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = _processed_drill_path(source_path, output_dir)
-    content = source_path.read_text(encoding="utf-8", errors="ignore")
-    processed_content = _add_alignment_drills(content, values, align_drills_plan.holes)
+    output_path = _alignment_drill_source_path(output_dir)
+    processed_content = _alignment_drill_source_content(values, align_drills_plan.holes)
     output_path.write_text(processed_content, encoding="utf-8")
-    command_values["drill"] = str(output_path)
+    command_values[PRE_ALIGN_DRILL_SOURCE_KEY] = str(output_path)
     command_values["x-offset"] = align_drills_plan.x_offset
     command_values["y-offset"] = align_drills_plan.y_offset
-    LOGGER.debug("Pre-processed drill file %r into %r", source_path, output_path)
+    LOGGER.debug("Pre-processed alignment drill source into %r", output_path)
     return PreProcessResult(command_values, 1, (output_path,))
+
+
+def align_drill_generation_values(values: dict[str, str]) -> dict[str, str]:
+    command_values = default_values()
+    for key in ALIGN_DRILL_PASSTHROUGH_KEYS:
+        command_values[key] = values.get(key, command_values.get(key, ""))
+    command_values.update(
+        {
+            "drill": values.get(PRE_ALIGN_DRILL_SOURCE_KEY, ""),
+            "drill-output": values.get(PRE_ALIGN_DRILL_OUTPUT_KEY, "")
+            or ALIGN_DRILL_OUTPUT_DEFAULT,
+            "zdrill": _drill_depth_z_value(values.get(PRE_ALIGN_DRILL_DEPTH_KEY, "")),
+            "drill-side": "front",
+            "drills-available": values.get(PRE_ALIGN_DRILL_DIAMETER_KEY, ""),
+            "onedrill": "true",
+        }
+    )
+    return command_values
 
 
 def align_drills_plan(values: dict[str, str], cutoff_bounds: GcodeBounds) -> AlignDrillsPlan:
@@ -148,40 +184,28 @@ def _front_side_cutoff_point(
     return -x_value, y_value
 
 
-def _add_alignment_drills(
-    content: str,
+def _alignment_drill_source_content(
     values: dict[str, str],
     holes: tuple[tuple[float, float], ...],
 ) -> str:
-    had_trailing_newline = content.endswith("\n")
-    lines = content.splitlines()
-    unit = _drill_unit(lines)
+    metric = _enabled(values, "metric")
+    unit = UNIT_MM if metric else UNIT_INCH
     diameter = _format_tool_diameter(_diameter_for_unit(values, unit))
-    tool_id = _free_tool_id(lines)
-    tool_definition = f"T{tool_id}C{diameter}"
-    drill_commands = [
-        f"T{tool_id}",
+    lines = [
+        "M48",
+        "METRIC,TZ" if unit == UNIT_MM else "INCH,TZ",
+        f"T01C{diameter}",
+        "%",
+        "G90",
+        "T01",
         *[
             _format_drill_hit(x_value, y_value, values, unit)
             for x_value, y_value in holes
         ],
+        "M30",
+        "",
     ]
-    updated_lines = _insert_tool_definition(lines, tool_definition)
-    updated_lines = _insert_drill_commands(updated_lines, drill_commands)
-    processed_content = "\n".join(updated_lines)
-    if had_trailing_newline and processed_content:
-        processed_content += "\n"
-    return processed_content
-
-
-def _drill_unit(lines: list[str]) -> str:
-    for raw_line in lines:
-        line = raw_line.strip().upper()
-        if "METRIC" in line or line == "M71":
-            return UNIT_MM
-        if "INCH" in line or line == "M72":
-            return UNIT_INCH
-    return UNIT_INCH
+    return "\n".join(lines)
 
 
 def _diameter_for_unit(values: dict[str, str], unit: str) -> float:
@@ -223,52 +247,6 @@ def _format_drill_hit(
     return f"X{_format_decimal(x_drill)}Y{_format_decimal(y_drill)}"
 
 
-def _free_tool_id(lines: list[str]) -> str:
-    tool_ids = [
-        match.group("id")
-        for line in lines
-        if (match := TOOL_RE.match(line.strip().upper()))
-        and int(match.group("id")) > 0
-    ]
-    used_tool_numbers = {int(tool_id) for tool_id in tool_ids}
-    tool_number = 1
-    while tool_number in used_tool_numbers:
-        tool_number += 1
-    width = max((len(tool_id) for tool_id in tool_ids), default=1)
-    return str(tool_number).zfill(width)
-
-
-def _insert_tool_definition(lines: list[str], tool_definition: str) -> list[str]:
-    updated_lines = list(lines)
-    for idx, raw_line in enumerate(updated_lines):
-        if raw_line.strip() == "%":
-            updated_lines.insert(idx, tool_definition)
-            return updated_lines
-
-    last_tool_idx = None
-    for idx, raw_line in enumerate(updated_lines):
-        if TOOL_RE.match(raw_line.strip().upper()):
-            last_tool_idx = idx
-    insert_idx = last_tool_idx + 1 if last_tool_idx is not None else len(updated_lines)
-    updated_lines.insert(insert_idx, tool_definition)
-    return updated_lines
-
-
-def _insert_drill_commands(lines: list[str], drill_commands: list[str]) -> list[str]:
-    updated_lines = list(lines)
-    body_start = 0
-    for idx, raw_line in enumerate(updated_lines):
-        if raw_line.strip() == "%":
-            body_start = idx + 1
-            break
-    insert_idx = len(updated_lines)
-    for idx in range(len(updated_lines) - 1, body_start - 1, -1):
-        if updated_lines[idx].strip().upper() in TRAILING_COMMANDS:
-            insert_idx = idx
-    updated_lines[insert_idx:insert_idx] = drill_commands
-    return updated_lines
-
-
 def _format_decimal(value: float) -> str:
     formatted = f"{value:.6f}".rstrip("0").rstrip(".")
     return formatted or "0"
@@ -278,16 +256,17 @@ def _format_tool_diameter(value: float) -> str:
     return f"{value:.3f}"
 
 
-def _processed_drill_path(source_path: Path, output_dir: Path) -> Path:
-    suffix = source_path.suffix or ".drl"
-    return output_dir / f"{source_path.stem}{PROCESSED_DRILL_SUFFIX}{suffix}"
+def _alignment_drill_source_path(output_dir: Path) -> Path:
+    return output_dir / ALIGN_DRILL_SOURCE_NAME
 
 
-def _resolve_path(value: str, base_dir: Path = None) -> Path:
-    path = Path(os.path.expanduser(value))
-    if path.is_absolute():
-        return path
-    return (base_dir or Path.cwd()) / path
+def _drill_depth_z_value(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    if normalized.startswith("-"):
+        return normalized
+    return f"-{normalized.removeprefix('+')}"
 
 
 def _enabled(values: dict[str, str], key: str) -> bool:

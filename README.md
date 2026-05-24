@@ -56,9 +56,10 @@ Gerber raster rendering. It applies the selected alignment, tiling, and alpha op
 layers are overlapped in one shared coordinate system with distinct colors for front and back
 copper. Alignment offsets move source artwork against generated NC output, while loaded NC files
 stay in their already-generated coordinates. Drill preview is best-effort: it reads common decimal
-Excellon drill files for visual guidance only. G-code preview reads generated NC output files and
-draws supported linear movement as bright cuts plus low-visibility retract/travel moves.
-`pcb2gcode` remains the source of truth for generated NC files.
+Excellon drill files for visual guidance only. When Align drills is enabled, preprocessing writes
+a separated two-hole Excellon source and front-side alignment drill NC file. G-code preview reads
+generated NC output files and draws supported linear movement as bright cuts plus low-visibility
+retract/travel moves. `pcb2gcode` remains the source of truth for generated NC files.
 
 ## Development
 

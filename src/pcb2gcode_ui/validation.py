@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 
 from pcb2gcode_ui.options import OPTION_SPECS, SPEC_BY_KEY, bool_value
-from pcb2gcode_ui.preprocess import PRE_ALIGN_DRILL_DIAMETER_KEY, PRE_ALIGN_DRILLS_KEY
+from pcb2gcode_ui.preprocess import (
+    PRE_ALIGN_DRILL_DEPTH_KEY,
+    PRE_ALIGN_DRILL_DIAMETER_KEY,
+    PRE_ALIGN_DRILLS_KEY,
+)
 
 
 @dataclass(frozen=True)
@@ -88,21 +92,10 @@ def _validate_cross_fields(values: dict[str, str], messages: list[ValidationMess
             messages.append(ValidationMessage(key, "Value must be at least 1."))
     if (
         _enabled(values, PRE_ALIGN_DRILLS_KEY)
-        and values.get("drill", "").strip()
         and values.get("outline", "").strip()
     ):
-        diameter = values.get(PRE_ALIGN_DRILL_DIAMETER_KEY, "").strip()
-        if not diameter:
-            messages.append(
-                ValidationMessage(
-                    PRE_ALIGN_DRILL_DIAMETER_KEY,
-                    f"{SPEC_BY_KEY[PRE_ALIGN_DRILL_DIAMETER_KEY].label} is required.",
-                )
-            )
-        elif _number_value(diameter) <= 0:
-            messages.append(
-                ValidationMessage(PRE_ALIGN_DRILL_DIAMETER_KEY, "Value must be positive.")
-            )
+        _validate_required_positive_number(values, messages, PRE_ALIGN_DRILL_DIAMETER_KEY)
+        _validate_required_non_zero_number(values, messages, PRE_ALIGN_DRILL_DEPTH_KEY)
 
 
 def _require(values: dict[str, str], messages: list[ValidationMessage], key: str):
@@ -110,7 +103,42 @@ def _require(values: dict[str, str], messages: list[ValidationMessage], key: str
         messages.append(ValidationMessage(key, f"{SPEC_BY_KEY[key].label} is required."))
 
 
-def _number_value(value: str) -> float:
+def _validate_required_positive_number(
+    values: dict[str, str],
+    messages: list[ValidationMessage],
+    key: str,
+):
+    value = _validate_required_number(values, messages, key)
+    if value is not None and value <= 0:
+        messages.append(ValidationMessage(key, "Value must be positive."))
+
+
+def _validate_required_number(
+    values: dict[str, str],
+    messages: list[ValidationMessage],
+    key: str,
+) -> float | None:
+    raw_value = values.get(key, "").strip()
+    if not raw_value:
+        messages.append(ValidationMessage(key, f"{SPEC_BY_KEY[key].label} is required."))
+        return None
+    value = _number_value(raw_value)
+    if value is None and not any(message.key == key for message in messages):
+        messages.append(ValidationMessage(key, "Expected a number or pcb2gcode unit value."))
+    return value
+
+
+def _validate_required_non_zero_number(
+    values: dict[str, str],
+    messages: list[ValidationMessage],
+    key: str,
+):
+    value = _validate_required_number(values, messages, key)
+    if value == 0:
+        messages.append(ValidationMessage(key, "Value must be non-zero."))
+
+
+def _number_value(value: str) -> float | None:
     normalized = value.strip().lower().rstrip("%")
     for suffix in ("in/min", "mm/min", "in", "mm", "ms", "s"):
         if normalized.endswith(suffix):
@@ -119,7 +147,7 @@ def _number_value(value: str) -> float:
     try:
         return float(normalized)
     except ValueError:
-        return 0
+        return None
 
 
 def _enabled(values: dict[str, str], key: str) -> bool:

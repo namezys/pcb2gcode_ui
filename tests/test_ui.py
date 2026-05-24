@@ -147,6 +147,9 @@ def test_app_build_adds_process_tabs_and_options():
     assert "Pre-process" in app.group_controls
     assert "pre-align-drills" in app.controls
     assert "pre-align-drill-diameter" in app.controls
+    assert "pre-align-drill-depth" in app.controls
+    assert "pre-align-drill-output" in app.controls
+    assert "pre-align-drill-source" in app.controls
     assert "Post-process" in app.group_controls
     assert "post-remove-t" in app.controls
 
@@ -504,6 +507,7 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
     app.values["output-dir"] = str(tmp_path / "nc")
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
+    app.values["pre-align-drill-depth"] = "1.2mm"
     calls: list[dict[str, str]] = []
     generate_calls: list[dict[str, str]] = []
 
@@ -518,11 +522,18 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
             }
         )
         command_values = dict(values)
-        command_values["drill"] = str(output_dir / "drill.pcb2gcode-ui-align-drills.drl")
-        return PreProcessResult(command_values, 1, (Path(command_values["drill"]),))
+        command_values["pre-align-drill-source"] = str(
+            output_dir / "pcb2gcode-ui-align-drills.drl"
+        )
+        return PreProcessResult(
+            command_values,
+            1,
+            (Path(command_values["pre-align-drill-source"]),),
+        )
 
     def fake_validate(values, base_dir):
-        assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        assert values["drill"] == str(tmp_path / "drill.drl")
+        assert values["pre-align-drill-source"].endswith("pcb2gcode-ui-align-drills.drl")
         assert values["x-offset"] == "-20mm"
         assert values["y-offset"] == "-30mm"
         return CommandResult(["validate"], 0, "valid")
@@ -544,8 +555,19 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
 
     assert generate_calls[0]["drill"] == str(tmp_path / "drill.drl")
     assert generate_calls[0]["output-dir"] == str(tmp_path / "nc" / "pcb2gcode-ui-preprocess")
-    assert generate_calls[1]["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+    assert generate_calls[1]["drill"] == str(tmp_path / "drill.drl")
     assert generate_calls[1]["output-dir"] == str(tmp_path / "nc")
+    assert generate_calls[2]["front"] == ""
+    assert generate_calls[2]["back"] == ""
+    assert generate_calls[2]["outline"] == ""
+    assert generate_calls[2]["drill"].endswith("pcb2gcode-ui-align-drills.drl")
+    assert generate_calls[2]["drill-output"] == "align-drill.ngc"
+    assert generate_calls[2]["zdrill"] == "-1.2mm"
+    assert generate_calls[2]["drill-side"] == "front"
+    assert generate_calls[2]["drills-available"] == "0.5mm"
+    assert generate_calls[2]["onedrill"] == "true"
+    assert generate_calls[2]["x-offset"] == "-20mm"
+    assert generate_calls[2]["y-offset"] == "-30mm"
     assert calls == [
         {
             "drill": str(tmp_path / "drill.drl"),
@@ -557,9 +579,11 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
     ]
     assert app.values["x-offset"] == "-20mm"
     assert app.values["y-offset"] == "-30mm"
-    assert "Pre-process: wrote 1 file(s): drill.pcb2gcode-ui-align-drills.drl." in (
+    assert app.values["pre-align-drill-source"].endswith("pcb2gcode-ui-align-drills.drl")
+    assert "Pre-process: wrote 1 file(s): pcb2gcode-ui-align-drills.drl." in (
         app.command_output.value
     )
+    assert "Alignment drill NC (front side):" in app.command_output.value
     assert app.generated_values_snapshot == app.values
 
 
@@ -579,6 +603,7 @@ def test_pre_process_failure_does_not_mark_generated_current(monkeypatch, tmp_pa
     app.values["cut-infeed"] = "0.5"
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
+    app.values["pre-align-drill-depth"] = "-1mm"
 
     def fake_pre_process(_values, _base_dir, _output_dir, _align_plan):
         raise OSError("cannot write")
@@ -617,6 +642,7 @@ def test_pre_process_first_generation_failure_stops_final_generation(monkeypatch
     app.values["cut-infeed"] = "0.5"
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
+    app.values["pre-align-drill-depth"] = "-1mm"
 
     def fake_pre_process(_values, _base_dir, _output_dir, _align_plan):
         raise AssertionError("final preprocess should not run")
@@ -809,7 +835,7 @@ def test_preview_content_uses_three_compact_control_rows():
     assert "Load NC" not in first_labels
     assert "Regenerate" not in first_labels
     assert second_labels == ["Gerber:", "Front", "Back", "Drill", "Cutoff", "Aux"]
-    assert third_labels == ["NC:", "Front", "Back", "Drill", "Milldrill", "Outline"]
+    assert third_labels == ["NC:", "Front", "Back", "Drill", "Align", "Milldrill", "Outline"]
     assert second_row.wrap is False
     assert third_row.wrap is False
     assert second_row.scroll == ft.ScrollMode.AUTO
@@ -985,14 +1011,13 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     assert rows[0].value == "NC tools"
     assert rows[1].controls[0].value == "Path"
     assert rows[1].controls[2].value == "Bit"
-    assert rows[2].content.value == "front.ngc"
-    assert rows[3].controls[0].value == "1"
-    assert rows[3].controls[1].value == "1"
-    assert rows[3].controls[2].value == "mill 0.5mm"
-    assert rows[3].controls[3].value == "3"
-    assert rows[3].controls[4].value == "1"
-    assert rows[3].controls[0].color == gcode_instrument_color(0)
-    assert len(rows) == 4
+    assert rows[2].controls[0].value == "1"
+    assert rows[2].controls[1].value == "1"
+    assert rows[2].controls[2].value == "mill 0.5mm"
+    assert rows[2].controls[3].value == "3"
+    assert rows[2].controls[4].value == "1"
+    assert rows[2].controls[0].color == gcode_instrument_color(0)
+    assert len(rows) == 3
 
 
 def test_gcode_status_shows_cutoff_bounds_from_outline_cut_paths():
@@ -1123,7 +1148,7 @@ def test_cutoff_status_reports_no_cutoff_without_outline_cut_paths():
     assert "Cutoff bounds:" not in app.gcode_status.value
 
 
-def test_gcode_instrument_overlay_separates_nc_files():
+def test_gcode_instrument_overlay_omits_nc_file_names():
     app = _app()
     front_trace = GcodeInterpreter().parse("G21\nT1 M6\nG1 X1 Z-0.1\n", "front")
     back_trace = GcodeInterpreter().parse("G21\nT2 M6\nG1 X2 Z-0.1\n", "back")
@@ -1136,10 +1161,8 @@ def test_gcode_instrument_overlay_separates_nc_files():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[2].content.value == "front"
-    assert rows[3].controls[1].value == "1"
-    assert rows[4].content.value == "back"
-    assert rows[5].controls[1].value == "2"
+    assert [row.controls[1].value for row in rows[2:]] == ["1", "2"]
+    assert all(not hasattr(row, "content") for row in rows[2:])
 
 
 def test_gcode_instrument_overlay_keeps_initial_tool_path():
@@ -1152,10 +1175,9 @@ def test_gcode_instrument_overlay_keeps_initial_tool_path():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[2].content.value == "front"
-    assert [row.controls[0].value for row in rows[3:]] == ["1"]
-    assert [row.controls[1].value for row in rows[3:]] == ["1"]
-    assert rows[3].controls[4].value == "0"
+    assert [row.controls[0].value for row in rows[2:]] == ["1"]
+    assert [row.controls[1].value for row in rows[2:]] == ["1"]
+    assert rows[2].controls[4].value == "0"
 
 
 def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
@@ -1168,8 +1190,7 @@ def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[2].content.value == "front"
-    assert [row.controls[1].value for row in rows[3:]] == ["1"]
+    assert [row.controls[1].value for row in rows[2:]] == ["1"]
     assert trace.retract_count == 1
 
 
@@ -1192,7 +1213,7 @@ def test_gcode_instrument_overlay_shows_mixed_tool_parameters():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[3].controls[2].value == "mixed"
+    assert rows[2].controls[2].value == "mixed"
 
 
 def test_gcode_visibility_checkbox_controls_render_options():
@@ -1243,6 +1264,16 @@ def test_gcode_source_checkboxes_do_not_limit_preview_sizing_trace():
         "front"
     }
     assert app.preview_renderer.sizing_gcode_trace is app.gcode_trace
+
+
+def test_selected_gcode_sources_includes_align_only_after_source_exists():
+    app = _app()
+
+    assert "align-drill" not in app._selected_gcode_sources()
+
+    app.values["pre-align-drill-source"] = "pcb2gcode-ui-align-drills.drl"
+
+    assert "align-drill" in app._selected_gcode_sources()
 
 
 def _app() -> Pcb2GCodeApp:
