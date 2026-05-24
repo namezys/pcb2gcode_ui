@@ -87,6 +87,7 @@ class PreviewOptions:
     show_gcode: bool = False
     aux_layer: Path = None
     gcode_trace: GcodeTrace = None
+    sizing_gcode_trace: GcodeTrace = None
     layer_alpha: int = DEFAULT_LAYER_ALPHA
     dpmm: int = DEFAULT_PREVIEW_DPMM
 
@@ -211,18 +212,17 @@ class GerberPreviewRenderer:
         visible_gerber_layers = _filter_visible_gerber_layers(all_gerber_layers, options, warnings)
         all_drill_layer = _collect_drill_layer(values, base_dir)
         drill_layer = all_drill_layer if options.show_drill else None
-        if drill_layer:
-            warnings.extend(drill_layer.warnings)
+        if all_drill_layer:
+            warnings.extend(all_drill_layer.warnings)
         gcode_trace = options.gcode_trace if options.show_gcode else None
-        if not visible_gerber_layers and not drill_layer and not _has_gcode(gcode_trace):
-            return PreviewResult(b"", warnings or ["No visible preview layers."], 0)
+        sizing_gcode_trace = options.sizing_gcode_trace or options.gcode_trace
 
         all_rendered_layers = self._render_gerber_layers(all_gerber_layers, options, warnings)
         visible_layer_kinds = {layer.kind for layer in visible_gerber_layers}
         rendered_layers = [
             layer for layer in all_rendered_layers if layer.kind in visible_layer_kinds
         ]
-        source_bounds = _source_bounds(all_rendered_layers, all_drill_layer, options.gcode_trace)
+        source_bounds = _source_bounds(all_rendered_layers, all_drill_layer, sizing_gcode_trace)
         if not source_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
 
@@ -231,7 +231,7 @@ class GerberPreviewRenderer:
             all_rendered_layers,
             all_drill_layer,
             settings,
-            options.gcode_trace,
+            sizing_gcode_trace,
         )
         if not transformed_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)

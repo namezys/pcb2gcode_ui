@@ -7,6 +7,10 @@ import flet as ft
 
 from pcb2gcode_ui.gcode_preview import (
     GcodeInterpreter,
+    GcodeMovementKind,
+    GcodePoint,
+    GcodeSegment,
+    GcodeSource,
     GcodeTrace,
     gcode_instrument_color,
 )
@@ -102,6 +106,7 @@ class FakePreviewRenderer:
         self.base_dir: Path = None
         self.aux_layer: Path = None
         self.gcode_trace = None
+        self.sizing_gcode_trace = None
         self.show_gcode = False
         self.show_front = False
         self.show_back = False
@@ -112,6 +117,7 @@ class FakePreviewRenderer:
         self.base_dir = base_dir
         self.aux_layer = options.aux_layer
         self.gcode_trace = options.gcode_trace
+        self.sizing_gcode_trace = options.sizing_gcode_trace
         self.show_gcode = options.show_gcode
         self.show_front = options.show_front
         self.show_back = options.show_back
@@ -586,6 +592,43 @@ def test_gcode_visibility_checkbox_controls_render_options():
     assert app.preview_renderer.show_gcode is False
     assert app.preview_renderer.gcode_trace is None
     assert app.gcode_instrument_overlay.visible is False
+
+
+def test_gcode_source_checkboxes_do_not_limit_preview_sizing_trace():
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+    app.gcode_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(1, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+            GcodeSegment(
+                GcodePoint(20, 0, -0.1),
+                GcodePoint(21, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                2,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc"), GcodeSource("back", "back.nc")],
+    )
+    app.preview_gcode.value = True
+    app.preview_gcode_back.value = False
+
+    app._refresh_preview(None)
+
+    assert {segment.source_kind for segment in app.preview_renderer.gcode_trace.segments} == {
+        "front"
+    }
+    assert app.preview_renderer.sizing_gcode_trace is app.gcode_trace
 
 
 def _app() -> Pcb2GCodeApp:

@@ -104,6 +104,163 @@ def test_render_preview_size_stays_stable_when_gerber_layers_are_hidden():
     assert hidden_result.layer_count == 1
 
 
+def test_render_preview_size_stays_stable_when_drill_is_hidden(monkeypatch, tmp_path: Path):
+    front_path = tmp_path / "front.gbr"
+    front_path.write_text("", encoding="utf-8")
+    drill_path = tmp_path / "board.xln"
+    drill_path.write_text(
+        "\n".join(
+            [
+                "M48",
+                "METRIC",
+                "T1C1.000",
+                "%",
+                "T1",
+                "X20Y20",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 1, 1),
+    )
+    monkeypatch.setattr(
+        GerberPreviewRenderer,
+        "_render_gerber_layers",
+        lambda *args: [front_layer],
+    )
+    values = {"front": str(front_path), "drill": str(drill_path), "metric": "true"}
+    renderer = GerberPreviewRenderer()
+
+    visible_result = renderer.render(
+        values,
+        tmp_path,
+        PreviewOptions(show_front=True, show_drill=True, show_cutoff=False, dpmm=1),
+    )
+    hidden_result = renderer.render(
+        values,
+        tmp_path,
+        PreviewOptions(show_front=True, show_drill=False, show_cutoff=False, dpmm=1),
+    )
+
+    visible_image = Image.open(BytesIO(visible_result.png))
+    hidden_image = Image.open(BytesIO(hidden_result.png))
+
+    assert hidden_image.size == visible_image.size
+    assert hidden_result.layer_count == 1
+
+
+def test_render_preview_size_stays_stable_when_cutoff_and_aux_are_hidden(
+    monkeypatch,
+    tmp_path: Path,
+):
+    front_path = tmp_path / "front.gbr"
+    outline_path = tmp_path / "outline.gbr"
+    aux_path = tmp_path / "aux.gbr"
+    for path in (front_path, outline_path, aux_path):
+        path.write_text("", encoding="utf-8")
+
+    def fake_render_layers(
+        renderer: GerberPreviewRenderer,
+        layers: list,
+        options: PreviewOptions,
+        warnings: list[str],
+    ) -> list[RenderedLayer]:
+        bounds_by_kind = {
+            PreviewLayerKind.FRONT: Bounds(0, 0, 1, 1),
+            PreviewLayerKind.CUTOFF: Bounds(0, 0, 20, 20),
+            PreviewLayerKind.AUX: Bounds(0, 0, 30, 30),
+        }
+        return [
+            RenderedLayer(
+                image=Image.new("RGBA", (1, 1), (*_layer_color(layer.kind), 255)),
+                kind=layer.kind,
+                bounds=bounds_by_kind[layer.kind],
+            )
+            for layer in layers
+        ]
+
+    monkeypatch.setattr(GerberPreviewRenderer, "_render_gerber_layers", fake_render_layers)
+    values = {
+        "front": str(front_path),
+        "outline": str(outline_path),
+        "metric": "true",
+    }
+    renderer = GerberPreviewRenderer()
+
+    visible_result = renderer.render(
+        values,
+        tmp_path,
+        PreviewOptions(
+            show_front=True,
+            show_drill=False,
+            show_cutoff=True,
+            show_aux=True,
+            aux_layer=aux_path,
+            dpmm=1,
+        ),
+    )
+    hidden_result = renderer.render(
+        values,
+        tmp_path,
+        PreviewOptions(
+            show_front=True,
+            show_drill=False,
+            show_cutoff=False,
+            show_aux=False,
+            aux_layer=aux_path,
+            dpmm=1,
+        ),
+    )
+
+    visible_image = Image.open(BytesIO(visible_result.png))
+    hidden_image = Image.open(BytesIO(hidden_result.png))
+
+    assert hidden_image.size == visible_image.size
+    assert hidden_result.layer_count == 1
+
+
+def test_render_preview_returns_stable_blank_canvas_when_all_layers_hidden(
+    monkeypatch,
+    tmp_path: Path,
+):
+    front_path = tmp_path / "front.gbr"
+    front_path.write_text("", encoding="utf-8")
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (1, 1), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(0, 0, 10, 10),
+    )
+    monkeypatch.setattr(
+        GerberPreviewRenderer,
+        "_render_gerber_layers",
+        lambda *args: [front_layer],
+    )
+    renderer = GerberPreviewRenderer()
+    values = {"front": str(front_path), "metric": "true"}
+
+    visible_result = renderer.render(
+        values,
+        tmp_path,
+        PreviewOptions(show_front=True, show_drill=False, show_cutoff=False, dpmm=1),
+    )
+    hidden_result = renderer.render(
+        values,
+        tmp_path,
+        PreviewOptions(show_front=False, show_drill=False, show_cutoff=False, dpmm=1),
+    )
+
+    visible_image = Image.open(BytesIO(visible_result.png))
+    hidden_image = Image.open(BytesIO(hidden_result.png))
+
+    assert hidden_result.ok
+    assert hidden_result.layer_count == 0
+    assert hidden_image.size == visible_image.size
+    assert hidden_image.getpixel((0, 0)) == (32, 35, 38, 255)
+
+
 def test_compose_preview_places_layers_in_shared_coordinate_system():
     front_color = _layer_color(PreviewLayerKind.FRONT)
     back_color = _layer_color(PreviewLayerKind.BACK)
@@ -968,6 +1125,75 @@ def test_render_preview_size_stays_stable_when_gcode_is_hidden():
 
     assert hidden_image.size == visible_image.size
     assert hidden_result.layer_count == 1
+
+
+def test_render_preview_size_stays_stable_when_gcode_source_is_hidden():
+    visible_trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(1, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc")],
+    )
+    sizing_trace = GcodeTrace(
+        [
+            *visible_trace.segments,
+            GcodeSegment(
+                GcodePoint(100, 0, -0.1),
+                GcodePoint(100, 20, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                2,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc"), GcodeSource("back", "back.nc")],
+    )
+    values = {"front": "pcb2gcode/extras/example_board/example_board-F.Cu.gbr", "metric": "true"}
+    renderer = GerberPreviewRenderer()
+
+    all_result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            show_front=True,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            gcode_trace=sizing_trace,
+            sizing_gcode_trace=sizing_trace,
+            dpmm=1,
+        ),
+    )
+    filtered_result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            show_front=True,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            gcode_trace=visible_trace,
+            sizing_gcode_trace=sizing_trace,
+            dpmm=1,
+        ),
+    )
+
+    all_image = Image.open(BytesIO(all_result.png))
+    filtered_image = Image.open(BytesIO(filtered_result.png))
+
+    assert filtered_image.size == all_image.size
+    assert filtered_result.layer_count == 2
 
 
 def test_compose_preview_does_not_mirror_back_layer():

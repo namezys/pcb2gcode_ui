@@ -839,6 +839,7 @@ class Pcb2GCodeApp:
                 show_gcode=bool(self.preview_gcode.value),
                 aux_layer=self.preview_aux_layer,
                 gcode_trace=gcode_trace,
+                sizing_gcode_trace=self.gcode_trace,
                 layer_alpha=round(self.preview_alpha.value),
             ),
         )
