@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from pcb2gcode_ui.options import OPTION_SPECS, SPEC_BY_KEY, bool_value
+from pcb2gcode_ui.preprocess import PRE_ALIGN_DRILL_DIAMETER_KEY, PRE_ALIGN_DRILLS_KEY
 
 
 @dataclass(frozen=True)
@@ -85,11 +86,36 @@ def _validate_cross_fields(values: dict[str, str], messages: list[ValidationMess
         value = values.get(key, "").strip()
         if value and value.isdigit() and int(value) < 1:
             messages.append(ValidationMessage(key, "Value must be at least 1."))
+    if _enabled(values, PRE_ALIGN_DRILLS_KEY) and values.get("drill", "").strip():
+        diameter = values.get(PRE_ALIGN_DRILL_DIAMETER_KEY, "").strip()
+        if not diameter:
+            messages.append(
+                ValidationMessage(
+                    PRE_ALIGN_DRILL_DIAMETER_KEY,
+                    f"{SPEC_BY_KEY[PRE_ALIGN_DRILL_DIAMETER_KEY].label} is required.",
+                )
+            )
+        elif _number_value(diameter) <= 0:
+            messages.append(
+                ValidationMessage(PRE_ALIGN_DRILL_DIAMETER_KEY, "Value must be positive.")
+            )
 
 
 def _require(values: dict[str, str], messages: list[ValidationMessage], key: str):
     if not values.get(key, "").strip():
         messages.append(ValidationMessage(key, f"{SPEC_BY_KEY[key].label} is required."))
+
+
+def _number_value(value: str) -> float:
+    normalized = value.strip().lower().rstrip("%")
+    for suffix in ("in/min", "mm/min", "in", "mm", "ms", "s"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
+    try:
+        return float(normalized)
+    except ValueError:
+        return 0
 
 
 def _enabled(values: dict[str, str], key: str) -> bool:

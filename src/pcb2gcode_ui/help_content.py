@@ -46,7 +46,9 @@ GENERAL_HELP = GeneralHelp(
         "and optional Aux reference geometry.\n"
         "4. Adjust grouped pcb2gcode options, then save the `millproject`.\n"
         "5. Run **Validate** before cutting.\n"
-        "6. Run **Generate NC** to write output files into the selected output directory.\n\n"
+        "6. Run **Generate NC** to write output files into the selected output directory. "
+        "Optional UI pre-process steps run before pcb2gcode; post-process steps run after "
+        "successful generation.\n\n"
         "## Project files\n\n"
         "`millproject` is the stable place for machine/job settings. Keep cutter diameters, "
         "feeds, speeds, safe heights, controller flags, and output filenames there. Board file "
@@ -216,6 +218,26 @@ OPTION_HELP_BY_KEY: dict[str, OptionHelp] = {
         "UI-only post-processing step run after successful NC generation. Enable it for "
         "controllers that do not want standalone tool-select lines or `Tn M6` tool-change "
         "lines to execute. Matching commands are preserved as `(PP: remove ...)` comments.",
+        (SOURCE_LOCAL_UI,),
+    ),
+    "pre-align-drills": _entry(
+        "pre-align-drills",
+        "Align drills",
+        "bool, default `false`",
+        "Writes a generated drill input copy before pcb2gcode runs.",
+        "UI-only pre-processing step. When enabled, the original Excellon drill file stays "
+        "unchanged. The UI writes a clearly named processed drill file into the output "
+        "directory, adds a free tool, and adds one drill hit at `(0, 0)` for alignment.",
+        (SOURCE_LOCAL_UI,),
+    ),
+    "pre-align-drill-diameter": _entry(
+        "pre-align-drill-diameter",
+        "Align drill diameter",
+        "length, no default",
+        "Sets the diameter for the generated alignment-drill tool.",
+        "Required when Align drills is enabled and a drill file is selected. Use a real bit "
+        "diameter accepted by the machine, for example `0.8mm` or `0.031in`. Values without "
+        "a suffix follow the Metric input setting.",
         (SOURCE_LOCAL_UI,),
     ),
     "single-thread": _entry(

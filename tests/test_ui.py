@@ -18,6 +18,7 @@ from pcb2gcode_ui.help_content import OPTION_HELP_BY_KEY
 from pcb2gcode_ui.millproject import parse_millproject
 from pcb2gcode_ui.options import SPEC_BY_KEY
 from pcb2gcode_ui.postprocess import PostProcessResult
+from pcb2gcode_ui.preprocess import PreProcessResult
 from pcb2gcode_ui.preview import PreviewResult, PreviewSide
 from pcb2gcode_ui.runner import CommandResult
 from pcb2gcode_ui.ui import MUTED_TEXT_COLOR, STALE_TEXT_COLOR, Pcb2GCodeApp
@@ -138,11 +139,14 @@ def test_app_build_constructs_initial_controls():
     assert page.controls
 
 
-def test_app_build_adds_post_process_tab_and_option():
+def test_app_build_adds_process_tabs_and_options():
     app = Pcb2GCodeApp(FakePage())
 
     app.build()
 
+    assert "Pre-process" in app.group_controls
+    assert "pre-align-drills" in app.controls
+    assert "pre-align-drill-diameter" in app.controls
     assert "Post-process" in app.group_controls
     assert "post-remove-t" in app.controls
 
@@ -481,6 +485,108 @@ def test_successful_generation_runs_enabled_post_process(monkeypatch):
     assert calls
     assert "Post-process: commented T* lines in 1 file(s), 3 line(s)." in app.command_output.value
     assert app.generated_values_snapshot == app.values
+
+
+def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: Path):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["drill"] = str(tmp_path / "drill.drl")
+    app.values["zdrill"] = "-1"
+    app.values["drill-feed"] = "100"
+    app.values["drill-speed"] = "1000"
+    app.values["output-dir"] = str(tmp_path / "nc")
+    app.values["pre-align-drills"] = "true"
+    app.values["pre-align-drill-diameter"] = "0.5mm"
+    calls: list[dict[str, str]] = []
+
+    def fake_pre_process(values, base_dir, output_dir):
+        calls.append(
+            {
+                "drill": values["drill"],
+                "output_dir": str(output_dir),
+            }
+        )
+        command_values = dict(values)
+        command_values["drill"] = str(output_dir / "drill.pcb2gcode-ui-align-drills.drl")
+        return PreProcessResult(command_values, 1, (Path(command_values["drill"]),))
+
+    def fake_validate(values, base_dir):
+        assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        return CommandResult(["validate"], 0, "valid")
+
+    def fake_generate(values, base_dir):
+        assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        return CommandResult(["generate"], 0, "generated")
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
+    monkeypatch.setattr("pcb2gcode_ui.ui.validate_with_binary", fake_validate)
+    monkeypatch.setattr("pcb2gcode_ui.ui.generate_nc_files", fake_generate)
+
+    app._generate(None)
+
+    assert calls == [{"drill": str(tmp_path / "drill.drl"), "output_dir": str(tmp_path / "nc")}]
+    assert "Pre-process: wrote 1 file(s): drill.pcb2gcode-ui-align-drills.drl." in (
+        app.command_output.value
+    )
+    assert app.generated_values_snapshot == app.values
+
+
+def test_pre_process_failure_does_not_mark_generated_current(monkeypatch, tmp_path: Path):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["drill"] = str(tmp_path / "drill.drl")
+    app.values["zdrill"] = "-1"
+    app.values["drill-feed"] = "100"
+    app.values["drill-speed"] = "1000"
+    app.values["pre-align-drills"] = "true"
+    app.values["pre-align-drill-diameter"] = "0.5mm"
+
+    def fake_pre_process(_values, _base_dir, _output_dir):
+        raise OSError("cannot write")
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
+
+    app._generate(None)
+
+    assert app.generated_values_snapshot is None
+    assert "Pre-process failed: cannot write" in app.command_output.value
+    assert app.generation_status.value == "NC: not generated for current session."
+
+
+def test_validate_uses_temporary_pre_process_output(monkeypatch, tmp_path: Path):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["drill"] = str(tmp_path / "drill.drl")
+    app.values["zdrill"] = "-1"
+    app.values["drill-feed"] = "100"
+    app.values["drill-speed"] = "1000"
+    app.values["pre-align-drills"] = "true"
+    app.values["pre-align-drill-diameter"] = "0.5mm"
+    output_dirs: list[Path] = []
+
+    def fake_pre_process(values, base_dir, output_dir):
+        output_dirs.append(output_dir)
+        command_values = dict(values)
+        command_values["drill"] = str(output_dir / "drill.pcb2gcode-ui-align-drills.drl")
+        return PreProcessResult(command_values, 1, (Path(command_values["drill"]),))
+
+    def fake_validate(values, base_dir):
+        assert values["drill"].endswith("drill.pcb2gcode-ui-align-drills.drl")
+        return CommandResult(["validate"], 0, "valid")
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
+    monkeypatch.setattr("pcb2gcode_ui.ui.validate_with_binary", fake_validate)
+
+    app._validate(None)
+
+    assert output_dirs
+    assert output_dirs[0].name.startswith("pcb2gcode-ui-preprocess-")
+    assert "Pre-process: wrote 1 file(s): drill.pcb2gcode-ui-align-drills.drl." in (
+        app.command_output.value
+    )
 
 
 def test_post_process_failure_does_not_mark_generated_current(monkeypatch):

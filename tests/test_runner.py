@@ -38,7 +38,13 @@ def test_build_arguments_resolves_relative_paths_against_base_dir(tmp_path: Path
     ]
 
 
-def test_build_arguments_skips_ui_only_post_process_options():
-    args = build_arguments({"post-remove-t": "true"})
+def test_build_arguments_skips_ui_only_process_options():
+    args = build_arguments(
+        {
+            "post-remove-t": "true",
+            "pre-align-drills": "true",
+            "pre-align-drill-diameter": "0.5mm",
+        }
+    )
 
     assert args == ["--noconfigfile"]

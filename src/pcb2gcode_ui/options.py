@@ -11,7 +11,7 @@ OUTPUT_FILE_OPTIONS = {
     "milldrill-output",
     "outline-output",
 }
-UI_ONLY_OPTIONS = {"post-remove-t"}
+UI_ONLY_OPTIONS = {"pre-align-drills", "pre-align-drill-diameter", "post-remove-t"}
 
 
 @dataclass(frozen=True)
@@ -321,6 +321,21 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "mirror-axis", "Alignment", "Mirror X axis", "number", "Two-sided flip axis x=VALUE.", "0"
     ),
     OptionSpec("mirror-yaxis", "Alignment", "Mirror Y axis", "bool", "Flip along Y axis.", "false"),
+    OptionSpec(
+        "pre-align-drills",
+        "Pre-process",
+        "Align drills",
+        "bool",
+        "Add an alignment drill at origin before generation.",
+        "false",
+    ),
+    OptionSpec(
+        "pre-align-drill-diameter",
+        "Pre-process",
+        "Align drill diameter",
+        "number",
+        "Diameter for the generated alignment drill.",
+    ),
     OptionSpec(
         "post-remove-t",
         "Post-process",

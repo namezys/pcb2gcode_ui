@@ -79,6 +79,13 @@ def test_post_process_option_is_post_process_option():
     assert SPEC_BY_KEY["post-remove-t"].group == "Post-process"
 
 
+def test_pre_process_options_are_pre_process_options():
+    assert {
+        SPEC_BY_KEY[key].group
+        for key in ("pre-align-drills", "pre-align-drill-diameter")
+    } == {"Pre-process"}
+
+
 def test_format_millproject_stores_paths_relative_to_project_dir(tmp_path: Path):
     content = format_millproject(
         {
@@ -97,3 +104,16 @@ def test_format_millproject_writes_post_process_group():
 
     assert "# Post-process" in content
     assert "post-remove-t=true" in content
+
+
+def test_format_millproject_writes_pre_process_group():
+    content = format_millproject(
+        {
+            "pre-align-drills": "true",
+            "pre-align-drill-diameter": "0.5mm",
+        }
+    )
+
+    assert "# Pre-process" in content
+    assert "pre-align-drills=true" in content
+    assert "pre-align-drill-diameter=0.5mm" in content

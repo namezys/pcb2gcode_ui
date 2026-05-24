@@ -23,3 +23,36 @@ def test_validate_values_rejects_fixed_feed_direction_with_tsp():
     )
 
     assert [message.key for message in messages] == ["mill-feed-direction"]
+
+
+def test_validate_values_requires_align_drill_diameter_when_enabled_with_drill():
+    messages = validate_values(
+        {
+            "drill": "drill.drl",
+            "zsafe": "5",
+            "zchange": "10",
+            "zdrill": "-1",
+            "drill-feed": "100",
+            "drill-speed": "1000",
+            "pre-align-drills": "true",
+        }
+    )
+
+    assert [message.key for message in messages] == ["pre-align-drill-diameter"]
+
+
+def test_validate_values_rejects_non_positive_align_drill_diameter():
+    messages = validate_values(
+        {
+            "drill": "drill.drl",
+            "zsafe": "5",
+            "zchange": "10",
+            "zdrill": "-1",
+            "drill-feed": "100",
+            "drill-speed": "1000",
+            "pre-align-drills": "true",
+            "pre-align-drill-diameter": "0",
+        }
+    )
+
+    assert [message.text for message in messages] == ["Value must be positive."]

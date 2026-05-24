@@ -1,6 +1,7 @@
 import base64
 from functools import partial
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import flet as ft
 
@@ -36,6 +37,11 @@ from pcb2gcode_ui.options import (
     default_values,
 )
 from pcb2gcode_ui.postprocess import POST_REMOVE_T_KEY, post_process_generated_files
+from pcb2gcode_ui.preprocess import (
+    PRE_ALIGN_DRILLS_KEY,
+    PreProcessResult,
+    pre_process_input_files,
+)
 from pcb2gcode_ui.preview import (
     DEFAULT_LAYER_ALPHA,
     GerberPreviewRenderer,
@@ -875,7 +881,20 @@ class Pcb2GCodeApp:
         if messages:
             self._set_output("\n".join(message.text for message in messages))
             return
-        result = validate_with_binary(self.values, base_dir=self._base_dir())
+        try:
+            with TemporaryDirectory(prefix="pcb2gcode-ui-preprocess-") as temp_dir:
+                pre_process_result = pre_process_input_files(
+                    self.values,
+                    self._base_dir(),
+                    Path(temp_dir),
+                )
+                result = validate_with_binary(
+                    pre_process_result.values,
+                    base_dir=self._base_dir(),
+                )
+                result = self._with_pre_process_summary(result, pre_process_result)
+        except OSError as error:
+            result = CommandResult(["pre-process"], 1, f"Pre-process failed: {error}")
         self._set_command_result(result)
 
     def _generate(self, _event):
@@ -884,11 +903,30 @@ class Pcb2GCodeApp:
         if messages:
             self._set_output("\n".join(message.text for message in messages))
             return
-        validation_result = validate_with_binary(self.values, base_dir=self._base_dir())
+        try:
+            pre_process_result = pre_process_input_files(
+                self.values,
+                self._base_dir(),
+                self._generation_output_dir(),
+            )
+        except OSError as error:
+            self._set_command_result(
+                CommandResult(["pre-process"], 1, f"Pre-process failed: {error}")
+            )
+            return
+        validation_result = validate_with_binary(
+            pre_process_result.values,
+            base_dir=self._base_dir(),
+        )
+        validation_result = self._with_pre_process_summary(validation_result, pre_process_result)
         if not validation_result.ok:
             self._set_command_result(validation_result)
             return
-        generation_result = generate_nc_files(self.values, base_dir=self._base_dir())
+        generation_result = generate_nc_files(
+            pre_process_result.values,
+            base_dir=self._base_dir(),
+        )
+        generation_result = self._with_pre_process_summary(generation_result, pre_process_result)
         if generation_result.ok:
             generation_result = self._post_process_generation_result(generation_result)
         self._set_command_result(generation_result)
@@ -913,6 +951,21 @@ class Pcb2GCodeApp:
             result.command,
             result.return_code,
             f"{result.output}\n\n{post_process_result.summary}",
+        )
+
+    def _with_pre_process_summary(
+        self,
+        result: CommandResult,
+        pre_process_result: PreProcessResult,
+    ) -> CommandResult:
+        if not bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false")):
+            return result
+        if not pre_process_result.processed_files:
+            return result
+        return CommandResult(
+            result.command,
+            result.return_code,
+            f"{result.output}\n\n{pre_process_result.summary}",
         )
 
     def _refresh_preview(self, _event):
@@ -1107,6 +1160,15 @@ class Pcb2GCodeApp:
         if self.current_millproject:
             return self.current_millproject.parent
         return self.working_directory
+
+    def _generation_output_dir(self) -> Path:
+        output_value = self.values.get("output-dir", "").strip()
+        if not output_value:
+            return default_output_directory(self.values)
+        output_path = Path(output_value).expanduser()
+        if output_path.is_absolute():
+            return output_path
+        return self._base_dir() / output_path
 
     def _set_working_directory(self, path: Path):
         self.working_directory = path
