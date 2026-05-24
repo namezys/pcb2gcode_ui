@@ -342,7 +342,7 @@ def test_compose_preview_back_side_paints_back_over_front():
     image = _compose_preview(
         [front_layer, back_layer],
         None,
-        Bounds(0, 0, 1, 1),
+        Bounds(-1, 0, 0, 1),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -433,7 +433,7 @@ def test_compose_preview_back_side_alpha_affects_only_back_and_drill():
     image = _compose_preview(
         [front_layer, back_layer],
         None,
-        Bounds(0, 0, 1, 1),
+        Bounds(-1, 0, 0, 1),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -520,7 +520,7 @@ def test_compose_preview_back_side_alpha_affects_only_back_gcode():
     image = _compose_preview(
         [],
         None,
-        Bounds(0, 0, 10, 10),
+        Bounds(-10, 0, 10, 10),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -552,7 +552,7 @@ def test_compose_preview_back_side_mirrors_all_layers_horizontally():
     image = _compose_preview(
         [front_layer],
         None,
-        Bounds(0, 0, 2, 1),
+        Bounds(-2, 0, 0, 1),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -574,7 +574,7 @@ def test_compose_preview_back_side_mirrors_drills_horizontally():
     image = _compose_preview(
         [],
         drill_layer,
-        Bounds(0, 0, 10, 10),
+        Bounds(-10, 0, 0, 10),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -819,7 +819,7 @@ def test_compose_preview_mirrors_back_gcode_axis_on_back_side():
     image = _compose_preview(
         [],
         None,
-        Bounds(-5, -1, 1, 5),
+        Bounds(-1, -1, 5, 5),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -1038,7 +1038,7 @@ def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
     image = _compose_preview(
         [],
         None,
-        Bounds(-2, 0, 10, 10),
+        Bounds(0, 0, 10, 10),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -1051,7 +1051,7 @@ def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
         trace,
     )
 
-    assert image.getpixel((10, 5))[:3] != (32, 35, 38)
+    assert image.getpixel((1, 5))[:3] != (32, 35, 38)
 
 
 def test_compose_preview_back_side_uses_mirror_yaxis_back_gcode_layout():
@@ -1073,7 +1073,7 @@ def test_compose_preview_back_side_uses_mirror_yaxis_back_gcode_layout():
     image = _compose_preview(
         [],
         None,
-        Bounds(0, -10, 10, 10),
+        Bounds(-10, -10, 0, 10),
         settings,
         PreviewOptions(
             side=PreviewSide.BACK,
@@ -1144,6 +1144,26 @@ def test_transformed_bounds_include_empty_gcode_source_axis():
     assert bounds.min_y == -2
     assert bounds.max_x == 6
     assert bounds.max_y == 6
+
+
+def test_transformed_bounds_mirror_back_preview_from_coordinate_origin():
+    front_layer = RenderedLayer(
+        image=Image.new("RGBA", (2, 1), (*_layer_color(PreviewLayerKind.FRONT), 255)),
+        kind=PreviewLayerKind.FRONT,
+        bounds=Bounds(2, 0, 4, 1),
+    )
+    settings = _preview_settings(Bounds(0, 0, 4, 1))
+
+    bounds = _transformed_bounds(
+        [front_layer],
+        None,
+        settings,
+        None,
+        PreviewOptions(side=PreviewSide.BACK),
+    )
+
+    assert bounds.min_x == -6
+    assert bounds.max_x == 0
 
 
 def test_transformed_bounds_scale_gcode_axis_from_largest_trace_size():

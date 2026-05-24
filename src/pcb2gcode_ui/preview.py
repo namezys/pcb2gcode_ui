@@ -41,9 +41,7 @@ DRILL_FORMAT_RE = re.compile(r"(?<!\d)(?P<integer>0+)\.(?P<decimal>0+)(?!\d)")
 GERBER_FORMAT_RE = re.compile(
     r"%FSLAX(?P<x_integer>\d)(?P<x_decimal>\d)Y(?P<y_integer>\d)(?P<y_decimal>\d)\*%"
 )
-GERBER_APERTURE_RE = re.compile(
-    r"%ADD(?P<id>\d+)C,(?P<diameter>[+-]?\d+(?:\.\d+)?)\*%"
-)
+GERBER_APERTURE_RE = re.compile(r"%ADD(?P<id>\d+)C,(?P<diameter>[+-]?\d+(?:\.\d+)?)\*%")
 GERBER_D_CODE_RE = re.compile(r"^D(?P<id>\d+)\*$")
 GERBER_COORDINATE_RE = re.compile(
     r"^(?:X(?P<x>[+-]?\d+))?(?:Y(?P<y>[+-]?\d+))?D(?P<operation>0[12])\*$"
@@ -232,6 +230,7 @@ class GerberPreviewRenderer:
             all_drill_layer,
             settings,
             sizing_gcode_trace,
+            options,
         )
         if not transformed_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
@@ -440,8 +439,7 @@ def _parse_drill_file(path: Path) -> DrillLayer:
                 tools[tool_id] = _unit_to_mm(float(diameter), drill_format.unit)
             continue
         coordinate_values = {
-            match.group("axis"): match.group("value")
-            for match in COORDINATE_RE.finditer(line)
+            match.group("axis"): match.group("value") for match in COORDINATE_RE.finditer(line)
         }
         if not coordinate_values:
             continue
@@ -602,20 +600,16 @@ def _gerber_coordinate_to_mm(value: str, decimal_places: int, unit: str) -> floa
 
 def _segment_bounds(segments: list[GerberSegment]) -> Bounds:
     min_x = min(
-        min(segment.start_x_mm, segment.end_x_mm) - segment.diameter_mm / 2
-        for segment in segments
+        min(segment.start_x_mm, segment.end_x_mm) - segment.diameter_mm / 2 for segment in segments
     )
     min_y = min(
-        min(segment.start_y_mm, segment.end_y_mm) - segment.diameter_mm / 2
-        for segment in segments
+        min(segment.start_y_mm, segment.end_y_mm) - segment.diameter_mm / 2 for segment in segments
     )
     max_x = max(
-        max(segment.start_x_mm, segment.end_x_mm) + segment.diameter_mm / 2
-        for segment in segments
+        max(segment.start_x_mm, segment.end_x_mm) + segment.diameter_mm / 2 for segment in segments
     )
     max_y = max(
-        max(segment.start_y_mm, segment.end_y_mm) + segment.diameter_mm / 2
-        for segment in segments
+        max(segment.start_y_mm, segment.end_y_mm) + segment.diameter_mm / 2 for segment in segments
     )
     return Bounds(min_x, min_y, max_x, max_y)
 
@@ -719,14 +713,23 @@ def _transformed_bounds(
     drill_layer: DrillLayer | None,
     settings: TransformSettings,
     gcode_trace: GcodeTrace = None,
+    options: PreviewOptions = None,
 ) -> Bounds | None:
+    preview_options = options or PreviewOptions()
     bounds: Bounds = None
     for layer in rendered_layers:
-        layer_bounds = _transform_bounds(layer.bounds, settings)
+        layer_bounds = _transform_layout_bounds(layer.bounds, layer.kind, settings, preview_options)
         bounds = layer_bounds if bounds is None else bounds.expand(layer_bounds)
     if drill_layer and drill_layer.hits:
         points = [
-            _transform_point(hit.x_mm, hit.y_mm, settings)
+            _transform_layout_point(
+                hit.x_mm,
+                hit.y_mm,
+                PreviewLayerKind.DRILL,
+                settings,
+                preview_options,
+                mirror_back_source=False,
+            )
             for hit in drill_layer.hits
         ]
         drill_bounds = Bounds(
@@ -738,7 +741,14 @@ def _transformed_bounds(
         bounds = drill_bounds if bounds is None else bounds.expand(drill_bounds)
     if _has_gcode_preview(gcode_trace):
         segment_points = [
-            _transform_gcode_point(point.x_mm, point.y_mm, segment.source_kind, settings)
+            _transform_layout_point(
+                point.x_mm,
+                point.y_mm,
+                segment.source_kind,
+                settings,
+                preview_options,
+                mirror_back_source=True,
+            )
             for segment in gcode_trace.segments
             for point in (segment.start, segment.end)
         ]
@@ -749,6 +759,7 @@ def _transformed_bounds(
                 source,
                 settings,
                 _gcode_axis_length(gcode_trace),
+                preview_options,
             )
         ]
         points = [*segment_points, *axis_points]
@@ -773,11 +784,20 @@ def _transform_bounds(
     bounds: Bounds,
     settings: TransformSettings,
 ) -> Bounds:
+    return _transform_layout_bounds(bounds, PreviewLayerKind.FRONT, settings, PreviewOptions())
+
+
+def _transform_layout_bounds(
+    bounds: Bounds,
+    kind: str,
+    settings: TransformSettings,
+    options: PreviewOptions,
+) -> Bounds:
     points = [
-        _transform_point(bounds.min_x, bounds.min_y, settings),
-        _transform_point(bounds.min_x, bounds.max_y, settings),
-        _transform_point(bounds.max_x, bounds.min_y, settings),
-        _transform_point(bounds.max_x, bounds.max_y, settings),
+        _transform_layout_point(bounds.min_x, bounds.min_y, kind, settings, options),
+        _transform_layout_point(bounds.min_x, bounds.max_y, kind, settings, options),
+        _transform_layout_point(bounds.max_x, bounds.min_y, kind, settings, options),
+        _transform_layout_point(bounds.max_x, bounds.max_y, kind, settings, options),
     ]
     return Bounds(
         min(point[0] for point in points),
@@ -797,6 +817,26 @@ def _transform_point(
     x_base += settings.x_offset_mm
     y_base += settings.y_offset_mm
     return x_base, y_base
+
+
+def _transform_layout_point(
+    x_value: float,
+    y_value: float,
+    kind: str,
+    settings: TransformSettings,
+    options: PreviewOptions,
+    mirror_back_source: bool = False,
+) -> tuple[float, float]:
+    x_base = x_value
+    y_base = y_value
+    if mirror_back_source and kind == PreviewLayerKind.BACK:
+        if settings.mirror_yaxis:
+            y_base = -y_base
+        else:
+            x_base = -x_base
+    if options.side == PreviewSide.BACK:
+        x_base = -x_base
+    return _transform_point(x_base, y_base, settings)
 
 
 def _compose_preview(
@@ -831,13 +871,48 @@ def _draw_rendered_layer(
     options: PreviewOptions,
 ):
     layer_image = _apply_alpha(layer.image, _layer_alpha_percent(layer.kind, options))
-    layer_bounds = _transform_bounds(layer.bounds, settings)
-    left = round((layer_bounds.min_x - bounds.min_x) * options.dpmm)
-    if _mirror_preview(options):
+    if _layout_flips_x(layer.bounds, layer.kind, settings, options):
         layer_image = layer_image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        left = image.width - left - layer_image.width
+    if _layout_flips_y(layer.bounds, layer.kind, settings, options):
+        layer_image = layer_image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    layer_bounds = _transform_layout_bounds(layer.bounds, layer.kind, settings, options)
+    left = round((layer_bounds.min_x - bounds.min_x) * options.dpmm)
     top = round((bounds.max_y - layer_bounds.max_y) * options.dpmm)
     image.alpha_composite(layer_image, (left, top))
+
+
+def _layout_flips_x(
+    bounds: Bounds,
+    kind: str,
+    settings: TransformSettings,
+    options: PreviewOptions,
+) -> bool:
+    left_x, _left_y = _transform_layout_point(bounds.min_x, bounds.min_y, kind, settings, options)
+    right_x, _right_y = _transform_layout_point(bounds.max_x, bounds.min_y, kind, settings, options)
+    return right_x < left_x
+
+
+def _layout_flips_y(
+    bounds: Bounds,
+    kind: str,
+    settings: TransformSettings,
+    options: PreviewOptions,
+) -> bool:
+    _bottom_x, bottom_y = _transform_layout_point(
+        bounds.min_x,
+        bounds.min_y,
+        kind,
+        settings,
+        options,
+    )
+    _top_x, top_y = _transform_layout_point(
+        bounds.min_x,
+        bounds.max_y,
+        kind,
+        settings,
+        options,
+    )
+    return top_y < bottom_y
 
 
 def _layer_paint_order(side: PreviewSide) -> tuple[PreviewLayerKind, ...]:
@@ -866,10 +941,6 @@ def _layer_alpha_percent(kind: PreviewLayerKind, options: PreviewOptions) -> int
     return 100
 
 
-def _mirror_preview(options: PreviewOptions) -> bool:
-    return options.side == PreviewSide.BACK
-
-
 def _preview_canvas_size(
     bounds: Bounds,
     settings: TransformSettings,
@@ -892,10 +963,15 @@ def _draw_drills(
     draw = ImageDraw.Draw(image)
     drill_alpha = _alpha_value(options.layer_alpha)
     for hit in drill_layer.hits:
-        x_value, y_value = _transform_point(hit.x_mm, hit.y_mm, settings)
+        x_value, y_value = _transform_layout_point(
+            hit.x_mm,
+            hit.y_mm,
+            PreviewLayerKind.DRILL,
+            settings,
+            options,
+            mirror_back_source=False,
+        )
         radius = max(hit.diameter_mm * options.dpmm / 2, 2)
-        if _mirror_preview(options):
-            x_value = bounds.max_x - x_value + bounds.min_x
         center_x = (x_value - bounds.min_x) * options.dpmm
         center_y = (bounds.max_y - y_value) * options.dpmm
         draw.ellipse(
@@ -1087,14 +1163,14 @@ def _preview_point(
     settings: TransformSettings,
     options: PreviewOptions,
 ) -> tuple[float, float]:
-    transformed_x, transformed_y = _transform_gcode_point(
+    transformed_x, transformed_y = _transform_layout_point(
         x_value,
         y_value,
         source_kind,
         settings,
+        options,
+        mirror_back_source=True,
     )
-    if _mirror_preview(options):
-        transformed_x = bounds.max_x - transformed_x + bounds.min_x
     return (
         (transformed_x - bounds.min_x) * options.dpmm,
         (bounds.max_y - transformed_y) * options.dpmm,
@@ -1107,13 +1183,14 @@ def _transform_gcode_point(
     source_kind: str,
     settings: TransformSettings,
 ) -> tuple[float, float]:
-    transformed_x, transformed_y = _transform_point(x_value, y_value, settings)
-    if source_kind == PreviewLayerKind.BACK:
-        if settings.mirror_yaxis:
-            transformed_y = -transformed_y
-        else:
-            transformed_x = -transformed_x
-    return transformed_x, transformed_y
+    return _transform_layout_point(
+        x_value,
+        y_value,
+        source_kind,
+        settings,
+        PreviewOptions(),
+        mirror_back_source=True,
+    )
 
 
 def _draw_dotted_line(
@@ -1169,11 +1246,7 @@ def _has_gcode_preview(trace: GcodeTrace = None) -> bool:
 
 
 def _gcode_bounds(trace: GcodeTrace) -> Bounds:
-    segment_points = [
-        point
-        for segment in trace.segments
-        for point in (segment.start, segment.end)
-    ]
+    segment_points = [point for segment in trace.segments for point in (segment.start, segment.end)]
     axis_points = [
         GcodePoint(x_value, y_value, 0)
         for _source in trace.sources
@@ -1200,9 +1273,18 @@ def _transformed_gcode_axis_points(
     source: GcodeSource,
     settings: TransformSettings,
     axis_length: float,
+    options: PreviewOptions = None,
 ) -> tuple[tuple[float, float], ...]:
+    preview_options = options or PreviewOptions()
     return tuple(
-        _transform_gcode_point(x_value, y_value, source.kind, settings)
+        _transform_layout_point(
+            x_value,
+            y_value,
+            source.kind,
+            settings,
+            preview_options,
+            mirror_back_source=True,
+        )
         for x_value, y_value in _raw_gcode_axis_points(axis_length)
     )
 
