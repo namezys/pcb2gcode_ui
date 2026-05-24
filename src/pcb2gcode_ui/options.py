@@ -35,7 +35,6 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
         "metricoutput", "Generic", "Metric output", "bool", "Use metric units for output.", "false"
     ),
     OptionSpec("tolerance", "Generic", "Tolerance", "number", "Maximum toolpath tolerance."),
-    OptionSpec("nog64", "Generic", "No G64", "bool", "Do not set an explicit G64.", "false"),
     OptionSpec("output-dir", "Generic", "Output directory", "directory", "Output directory."),
     OptionSpec("basename", "Generic", "Basename", "text", "Prefix for default output file names."),
     OptionSpec("sanity-checks", "Generic", "Sanity checks", "bool", "Run sanity checks.", "false"),
@@ -55,6 +54,12 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     OptionSpec(
         "zchange-absolute", "CNC", "Z change absolute", "bool", "Use G53 machine height.", "false"
     ),
+    OptionSpec("nog64", "CNC", "No G64", "bool", "Do not set an explicit G64.", "false"),
+    OptionSpec(
+        "nog91-1", "CNC", "No G91.1", "bool", "Do not set G91.1 in drill headers.", "false"
+    ),
+    OptionSpec("nog81", "CNC", "No G81", "bool", "Replace G81 with G0 and G1.", "false"),
+    OptionSpec("nom6", "CNC", "No M6", "bool", "Do not emit M6 on tool changes.", "false"),
     OptionSpec("tile-x", "CNC", "Tile columns", "integer", "Number of tiling columns.", "1"),
     OptionSpec("tile-y", "CNC", "Tile rows", "integer", "Number of tiling rows.", "1"),
     OptionSpec("voronoi", "Milling", "Voronoi", "bool", "Generate voronoi regions.", "false"),
@@ -164,11 +169,6 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     OptionSpec(
         "onedrill", "Drilling", "One drill", "bool", "Use only one drill bit size.", "false"
     ),
-    OptionSpec(
-        "nog91-1", "Drilling", "No G91.1", "bool", "Do not set G91.1 in drill headers.", "false"
-    ),
-    OptionSpec("nog81", "Drilling", "No G81", "bool", "Replace G81 with G0 and G1.", "false"),
-    OptionSpec("nom6", "Drilling", "No M6", "bool", "Do not emit M6 on tool changes.", "false"),
     OptionSpec(
         "drill-output", "Output", "Drill output", "text", "Output file for drilling.", "drill.ngc"
     ),

@@ -5,6 +5,7 @@ from pcb2gcode_ui.millproject import (
     parse_millproject,
     validate_millproject_format,
 )
+from pcb2gcode_ui.options import SPEC_BY_KEY
 
 
 def test_parse_millproject_reads_known_options_and_ignores_comments(tmp_path: Path):
@@ -66,6 +67,12 @@ def test_format_millproject_writes_canonical_groups():
     assert "front=front.gbr" in content
     assert "# CNC" in content
     assert "zsafe=5" in content
+
+
+def test_no_g_and_no_m_options_are_cnc_options():
+    assert {SPEC_BY_KEY[key].group for key in ("nog64", "nog91-1", "nog81", "nom6")} == {
+        "CNC"
+    }
 
 
 def test_format_millproject_stores_paths_relative_to_project_dir(tmp_path: Path):
