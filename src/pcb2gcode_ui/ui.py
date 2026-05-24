@@ -4,7 +4,7 @@ from pathlib import Path
 
 import flet as ft
 
-from pcb2gcode_ui.app_state import load_last_directory, save_last_directory
+from pcb2gcode_ui.app_state import AppSettings, load_app_settings, save_app_settings
 from pcb2gcode_ui.gcode_preview import (
     GcodeToolPath,
     GcodeTrace,
@@ -82,6 +82,7 @@ SURFACE_COLOR = ft.Colors.GREY_800
 FIELD_BACKGROUND_COLOR = ft.Colors.GREY_900
 TEXT_COLOR = ft.Colors.GREY_100
 MUTED_TEXT_COLOR = ft.Colors.GREY_300
+STALE_TEXT_COLOR = ft.Colors.RED_300
 OUTLINE_COLOR = ft.Colors.BLUE_GREY_300
 FOCUSED_OUTLINE_COLOR = ft.Colors.LIGHT_BLUE_300
 APP_SUMMARY = (
@@ -97,7 +98,10 @@ class Pcb2GCodeApp:
         self.values = default_values()
         self.controls: dict[str, ft.Control] = {}
         self.current_millproject: Path = None
-        self.working_directory = load_last_directory()
+        self.app_settings = load_app_settings()
+        self.default_millproject = self.app_settings.default_millproject
+        self.working_directory = self.app_settings.last_directory
+        self.generated_values_snapshot: dict[str, str] = None
         self.file_picker = ft.FilePicker()
         self.other_layer_picker = ft.FilePicker()
         self.directory_picker = ft.FilePicker()
@@ -206,6 +210,8 @@ class Pcb2GCodeApp:
         self.preview_dialog: ft.AlertDialog = None
         self.help_dialog: ft.AlertDialog = None
         self.status_text = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
+        self.generation_status = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
+        self._update_generation_status()
         self.group_container = ft.Column(spacing=8)
         self.group_controls: dict[str, ft.Control] = {}
         self.command_output = ft.TextField(
@@ -246,6 +252,7 @@ class Pcb2GCodeApp:
                     self._build_toolbar(),
                     self._build_summary(),
                     self.status_text,
+                    self.generation_status,
                     self._build_file_section(),
                     self._build_parameter_sections(),
                     self.command_output,
@@ -253,6 +260,7 @@ class Pcb2GCodeApp:
                 spacing=12,
             )
         )
+        self._load_default_millproject_on_startup()
 
     def _build_toolbar(self) -> ft.Control:
         return ft.Row(
@@ -265,6 +273,18 @@ class Pcb2GCodeApp:
                 ),
                 ft.OutlinedButton(
                     "Save As", icon=ft.Icons.SAVE_AS, on_click=self._save_as, style=_button_style()
+                ),
+                ft.OutlinedButton(
+                    "Set Default",
+                    icon=ft.Icons.STAR,
+                    on_click=self._set_default_millproject,
+                    style=_button_style(),
+                ),
+                ft.OutlinedButton(
+                    "Reset to Default",
+                    icon=ft.Icons.RESTART_ALT,
+                    on_click=self._reset_to_default_millproject,
+                    style=_button_style(),
                 ),
                 ft.OutlinedButton(
                     "Validate", icon=ft.Icons.CHECK, on_click=self._validate, style=_button_style()
@@ -668,7 +688,13 @@ class Pcb2GCodeApp:
         self.page.pop_dialog()
         self.page.update()
 
-    def _set_value(self, key: str, value: str, update_control: bool = True):
+    def _set_value(
+        self,
+        key: str,
+        value: str,
+        update_control: bool = True,
+        mark_generated_stale: bool = True,
+    ):
         self.values[key] = value
         control = self.controls.get(key)
         if update_control and control:
@@ -677,11 +703,17 @@ class Pcb2GCodeApp:
             else:
                 control.value = value
         self._clear_control_error(key)
+        if mark_generated_stale:
+            self._update_generation_status()
         self.page.update()
 
-    def _set_default_output_dir(self):
+    def _set_default_output_dir(self, mark_generated_stale: bool = True):
         if not self.values.get("output-dir", "").strip():
-            self._set_value("output-dir", str(default_output_directory(self.values)))
+            self._set_value(
+                "output-dir",
+                str(default_output_directory(self.values)),
+                mark_generated_stale=mark_generated_stale,
+            )
 
     async def _pick_input_file(self, _event, key: str):
         selected_files = await self.file_picker.pick_files(
@@ -758,24 +790,52 @@ class Pcb2GCodeApp:
         if not selected_path:
             self._set_output("Selected millproject has no local filesystem path.")
             return
-        path = Path(selected_path)
+        self._load_millproject(Path(selected_path), "Loaded")
+
+    def _load_default_millproject_on_startup(self):
+        if not self.default_millproject:
+            return
+        self._load_millproject(self.default_millproject, "Loaded default", fail_prefix="Default")
+
+    def _set_default_millproject(self, _event):
+        if not self.current_millproject:
+            self._set_output("Open or save a millproject before setting it as default.")
+            return
+        self.default_millproject = self.current_millproject
+        self._save_app_settings()
+        self._set_output(f"Default millproject set to {self.current_millproject}")
+
+    def _reset_to_default_millproject(self, _event):
+        if not self.default_millproject:
+            self._set_output("No default millproject is configured.")
+            return
+        self._load_millproject(self.default_millproject, "Reset to default", fail_prefix="Default")
+
+    def _load_millproject(
+        self,
+        path: Path,
+        success_prefix: str,
+        fail_prefix: str = "Invalid",
+    ) -> bool:
         format_messages = validate_millproject_format(path)
         if format_messages:
-            self._set_output(_format_open_format_error(path, format_messages))
-            return
+            self._set_output(_format_open_format_error(path, format_messages, fail_prefix))
+            return False
         values = parse_millproject(path)
         messages = validate_values(values)
         if messages:
             self._show_validation_messages(messages)
-            self._set_output(_format_open_validation_error(path, messages))
-            return
+            self._set_output(_format_open_validation_error(path, messages, fail_prefix))
+            return False
         self.current_millproject = path
         self._set_working_directory(path.parent)
         self.values = values
         for key, value in self.values.items():
-            self._set_value(key, value)
-        self._set_default_output_dir()
-        self._set_output(f"Loaded {path}")
+            self._set_value(key, value, mark_generated_stale=False)
+        self._set_default_output_dir(mark_generated_stale=False)
+        self._clear_generated_snapshot()
+        self._set_output(f"{success_prefix} {path}")
+        return True
 
     async def _save(self, _event):
         if not self.current_millproject:
@@ -821,6 +881,11 @@ class Pcb2GCodeApp:
             return
         generation_result = generate_nc_files(self.values, base_dir=self._base_dir())
         self._set_command_result(generation_result)
+        if generation_result.ok:
+            self.generated_values_snapshot = self._values_snapshot()
+            self._reset_gcode_preview_after_generation()
+            self._update_generation_status()
+            self.page.update()
 
     def _refresh_preview(self, _event):
         gcode_trace = None
@@ -963,6 +1028,33 @@ class Pcb2GCodeApp:
         self.command_output.value = text
         self.page.update()
 
+    def _values_snapshot(self) -> dict[str, str]:
+        return dict(self.values)
+
+    def _clear_generated_snapshot(self):
+        self.generated_values_snapshot = None
+        self._reset_gcode_preview_after_generation()
+        self._update_generation_status()
+
+    def _update_generation_status(self):
+        if self.generated_values_snapshot is None:
+            self.generation_status.value = "NC: not generated for current session."
+            self.generation_status.color = MUTED_TEXT_COLOR
+        elif self.generated_values_snapshot == self._values_snapshot():
+            self.generation_status.value = "NC: generated for current settings."
+            self.generation_status.color = MUTED_TEXT_COLOR
+        else:
+            self.generation_status.value = "NC: generated output is stale; settings changed."
+            self.generation_status.color = STALE_TEXT_COLOR
+
+    def _reset_gcode_preview_after_generation(self):
+        self.gcode_trace = None
+        self.preview_gcode.value = False
+        self._set_gcode_status()
+        self._set_gcode_instrument_overlay(None)
+        if self.preview_dialog:
+            self._refresh_preview(None)
+
     def _refresh_binary_status(self):
         try:
             binary = discover_binary()
@@ -979,7 +1071,15 @@ class Pcb2GCodeApp:
 
     def _set_working_directory(self, path: Path):
         self.working_directory = path
-        save_last_directory(path)
+        self._save_app_settings()
+
+    def _save_app_settings(self):
+        save_app_settings(
+            AppSettings(
+                last_directory=self.working_directory,
+                default_millproject=self.default_millproject,
+            )
+        )
 
     def _configure_window(self):
         window = getattr(self.page, "window", None)
@@ -1158,14 +1258,22 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(value, maximum))
 
 
-def _format_open_validation_error(path: Path, messages: list[ValidationMessage]) -> str:
-    lines = [f"Invalid millproject file: {path}", ""]
+def _format_open_validation_error(
+    path: Path,
+    messages: list[ValidationMessage],
+    prefix: str = "Invalid",
+) -> str:
+    lines = [f"{prefix} millproject file: {path}", ""]
     lines.extend(f"{SPEC_BY_KEY[message.key].label}: {message.text}" for message in messages)
     return "\n".join(lines)
 
 
-def _format_open_format_error(path: Path, messages: list[str]) -> str:
-    lines = [f"Invalid millproject file format: {path}", ""]
+def _format_open_format_error(
+    path: Path,
+    messages: list[str],
+    prefix: str = "Invalid",
+) -> str:
+    lines = [f"{prefix} millproject file format: {path}", ""]
     lines.extend(messages)
     return "\n".join(lines)
 

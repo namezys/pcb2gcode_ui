@@ -2,28 +2,73 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
 STATE_FILE_ENV_VAR = "PCB2GCODE_UI_STATE_FILE"
 STATE_FILE_NAME = "state.json"
 LAST_DIRECTORY_KEY = "last_directory"
+DEFAULT_MILLPROJECT_KEY = "default_millproject"
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    last_directory: Path
+    default_millproject: Path = None
 
 
 def load_last_directory() -> Path:
+    return load_app_settings().last_directory
+
+
+def save_last_directory(path: Path) -> None:
+    settings = load_app_settings()
+    save_app_settings(
+        AppSettings(
+            last_directory=path,
+            default_millproject=settings.default_millproject,
+        )
+    )
+
+
+def load_app_settings() -> AppSettings:
     state_file = _state_file()
     try:
         data = json.loads(state_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return Path.cwd()
+        return AppSettings(last_directory=Path.cwd())
     except json.JSONDecodeError:
         LOGGER.warning("Ignoring invalid app state file %s", state_file)
-        return Path.cwd()
+        return AppSettings(last_directory=Path.cwd())
 
     if not isinstance(data, dict):
         LOGGER.warning("Ignoring non-object app state file %s", state_file)
-        return Path.cwd()
+        return AppSettings(last_directory=Path.cwd())
 
+    return AppSettings(
+        last_directory=_load_directory(data),
+        default_millproject=_load_default_millproject(data),
+    )
+
+
+def save_app_settings(settings: AppSettings) -> None:
+    state_file = _state_file()
+    data = {LAST_DIRECTORY_KEY: str(settings.last_directory.expanduser())}
+    if settings.default_millproject:
+        data[DEFAULT_MILLPROJECT_KEY] = str(settings.default_millproject.expanduser())
+
+    try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(
+            json.dumps(data, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        LOGGER.exception("Failed to save app state to %s", state_file)
+
+
+def _load_directory(data: dict) -> Path:
     path_value = data.get(LAST_DIRECTORY_KEY)
     if not isinstance(path_value, str):
         return Path.cwd()
@@ -35,16 +80,16 @@ def load_last_directory() -> Path:
     return path
 
 
-def save_last_directory(path: Path) -> None:
-    state_file = _state_file()
-    try:
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(
-            json.dumps({LAST_DIRECTORY_KEY: str(path.expanduser())}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    except OSError:
-        LOGGER.exception("Failed to save app state to %s", state_file)
+def _load_default_millproject(data: dict) -> Path:
+    path_value = data.get(DEFAULT_MILLPROJECT_KEY)
+    if not isinstance(path_value, str):
+        return None
+
+    path = Path(path_value).expanduser()
+    if not path.is_file():
+        LOGGER.debug("Ignoring missing default millproject %s", path)
+        return None
+    return path
 
 
 def _state_file() -> Path:

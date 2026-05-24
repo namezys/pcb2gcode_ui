@@ -18,7 +18,8 @@ from pcb2gcode_ui.help_content import OPTION_HELP_BY_KEY
 from pcb2gcode_ui.millproject import parse_millproject
 from pcb2gcode_ui.options import SPEC_BY_KEY
 from pcb2gcode_ui.preview import PreviewResult, PreviewSide
-from pcb2gcode_ui.ui import Pcb2GCodeApp
+from pcb2gcode_ui.runner import CommandResult
+from pcb2gcode_ui.ui import MUTED_TEXT_COLOR, STALE_TEXT_COLOR, Pcb2GCodeApp
 
 
 @dataclass
@@ -165,6 +166,47 @@ def test_set_working_directory_persists_last_directory(tmp_path: Path, monkeypat
     }
 
 
+def test_set_working_directory_preserves_default_millproject(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    last_directory = tmp_path / "last"
+    default_path = tmp_path / "millproject"
+    last_directory.mkdir()
+    default_path.write_text("metric=true\n", encoding="utf-8")
+    state_file.write_text(
+        json.dumps({"default_millproject": str(default_path)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    app = Pcb2GCodeApp(FakePage())
+
+    app._set_working_directory(last_directory)
+
+    assert json.loads(state_file.read_text(encoding="utf-8")) == {
+        "last_directory": str(last_directory),
+        "default_millproject": str(default_path),
+    }
+
+
+def test_app_build_loads_default_millproject(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    default_path = tmp_path / "millproject"
+    default_path.write_text("metric=true\nzsafe=5\nzchange=10\n", encoding="utf-8")
+    state_file.write_text(
+        json.dumps({"default_millproject": str(default_path)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    page = FakePage()
+
+    app = Pcb2GCodeApp(page)
+    app.build()
+
+    assert app.current_millproject == default_path
+    assert app.values["metric"] == "true"
+    assert app.values["zsafe"] == "5"
+    assert app.command_output.value == f"Loaded default {default_path}"
+
+
 def test_open_file_awaits_picker_and_loads_millproject(tmp_path: Path):
     millproject_path = tmp_path / "millproject"
     millproject_path.write_text("metric=true\nzsafe=5\nzchange=10\n", encoding="utf-8")
@@ -221,6 +263,73 @@ def test_open_file_rejects_plain_text_file(tmp_path: Path):
     assert app.working_directory == start_path
     assert app.command_output.value.startswith("Invalid millproject file format:")
     assert "Line #1: expected key=value." in app.command_output.value
+
+
+def test_set_default_millproject_persists_current_project(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    millproject_path = tmp_path / "millproject"
+    millproject_path.write_text("metric=true\nzsafe=5\nzchange=10\n", encoding="utf-8")
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    app = _app()
+    app.current_millproject = millproject_path
+
+    app._set_default_millproject(None)
+
+    assert app.default_millproject == millproject_path
+    assert json.loads(state_file.read_text(encoding="utf-8"))["default_millproject"] == str(
+        millproject_path
+    )
+    assert app.command_output.value == f"Default millproject set to {millproject_path}"
+
+
+def test_set_default_millproject_requires_current_project():
+    app = _app()
+    app.default_millproject = None
+
+    app._set_default_millproject(None)
+
+    assert app.default_millproject is None
+    assert app.command_output.value == "Open or save a millproject before setting it as default."
+
+
+def test_reset_to_default_millproject_loads_default(tmp_path: Path):
+    millproject_path = tmp_path / "millproject"
+    millproject_path.write_text("metric=true\nzsafe=5\nzchange=10\n", encoding="utf-8")
+    app = _app()
+    app.default_millproject = millproject_path
+    app.values["metric"] = "false"
+    app.controls["metric"] = ft.Checkbox()
+
+    app._reset_to_default_millproject(None)
+
+    assert app.current_millproject == millproject_path
+    assert app.values["metric"] == "true"
+    assert app.controls["metric"].value is True
+    assert app.command_output.value == f"Reset to default {millproject_path}"
+
+
+def test_reset_to_default_millproject_does_not_mutate_when_invalid(tmp_path: Path):
+    millproject_path = tmp_path / "millproject"
+    millproject_path.write_text("zsafe=5\n", encoding="utf-8")
+    app = _app()
+    app.default_millproject = millproject_path
+    app.values["zsafe"] = "1"
+    app.controls["zchange"] = ft.TextField()
+
+    app._reset_to_default_millproject(None)
+
+    assert app.current_millproject is None
+    assert app.values["zsafe"] == "1"
+    assert app.command_output.value.startswith("Default millproject file:")
+
+
+def test_reset_to_default_millproject_requires_default():
+    app = _app()
+    app.default_millproject = None
+
+    app._reset_to_default_millproject(None)
+
+    assert app.command_output.value == "No default millproject is configured."
 
 
 def test_pick_input_file_sets_default_output_directory(tmp_path: Path):
@@ -315,6 +424,108 @@ def test_refresh_preview_sets_image_data_uri():
     assert app.preview_renderer.show_front is True
     assert app.preview_renderer.show_back is True
     assert app.preview_renderer.layer_alpha == 70
+
+
+def test_successful_generation_marks_current_settings_generated(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+
+    app._generate(None)
+
+    assert app.generated_values_snapshot == app.values
+    assert app.generation_status.value == "NC: generated for current settings."
+
+
+def test_editing_after_generation_marks_output_stale(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.controls["zsafe"] = ft.TextField()
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+    app._generate(None)
+
+    app._set_value("zsafe", "6")
+
+    assert app.generation_status.value == "NC: generated output is stale; settings changed."
+    assert app.generation_status.color == STALE_TEXT_COLOR
+
+
+def test_generated_status_uses_muted_color_when_current(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+
+    app._generate(None)
+
+    assert app.generation_status.color == MUTED_TEXT_COLOR
+
+
+def test_failed_generation_does_not_mark_current_settings_generated(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 1, "failed"),
+    )
+
+    app._generate(None)
+
+    assert app.generated_values_snapshot is None
+    assert app.generation_status.value == "NC: not generated for current session."
+
+
+def test_successful_generation_resets_gcode_preview(monkeypatch):
+    app = _app()
+    app.preview_renderer = FakePreviewRenderer()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.gcode_trace = GcodeTrace([], [], [], [GcodeSource("front", "front.nc")])
+    app.preview_gcode.value = True
+    app.preview_dialog = object()
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+
+    app._generate(None)
+
+    assert app.gcode_trace is None
+    assert app.preview_gcode.value is False
+    assert app.gcode_status.value == "G-code is not loaded."
+    assert app.preview_renderer.show_gcode is False
 
 
 def test_preview_side_selector_updates_preview_side():
