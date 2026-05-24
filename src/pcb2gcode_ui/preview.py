@@ -920,7 +920,7 @@ def _draw_gcode_trace(
 ):
     draw = ImageDraw.Draw(image)
     tool_path_colors = {
-        tool_path.id: _hex_to_rgba(gcode_instrument_color(idx), GCODE_CUT_ALPHA)
+        tool_path.id: gcode_instrument_color(idx)
         for idx, tool_path in enumerate(trace.active_tool_paths)
     }
     for idx, source in enumerate(trace.sources):
@@ -950,9 +950,12 @@ def _draw_gcode_trace(
             settings,
             options,
         )
-        color = tool_path_colors.get(
-            gcode_tool_path_id(segment.source_kind, segment.tool_id),
-            _hex_to_rgba(gcode_instrument_color(0), GCODE_CUT_ALPHA),
+        color = _hex_to_rgba(
+            tool_path_colors.get(
+                gcode_tool_path_id(segment.source_kind, segment.tool_id),
+                gcode_instrument_color(0),
+            ),
+            _gcode_segment_alpha(segment.source_kind, GCODE_CUT_ALPHA, options),
         )
         if segment.movement == GcodeMovementKind.CUT:
             draw.line(
@@ -965,10 +968,27 @@ def _draw_gcode_trace(
                 draw,
                 start,
                 end,
-                fill=(color[0], color[1], color[2], GCODE_RETRACT_ALPHA),
+                fill=(
+                    color[0],
+                    color[1],
+                    color[2],
+                    _gcode_segment_alpha(segment.source_kind, GCODE_RETRACT_ALPHA, options),
+                ),
                 width=max(round(options.dpmm * GCODE_RETRACT_WIDTH_MM), 1),
                 gap_px=max(round(options.dpmm * GCODE_RETRACT_GAP_MM), 2),
             )
+
+
+def _gcode_segment_alpha(
+    source_kind: str,
+    base_alpha: int,
+    options: PreviewOptions,
+) -> int:
+    if source_kind == PreviewLayerKind.FRONT and options.side == PreviewSide.FRONT:
+        return round(base_alpha * options.layer_alpha / 100)
+    if source_kind == PreviewLayerKind.BACK and options.side == PreviewSide.BACK:
+        return round(base_alpha * options.layer_alpha / 100)
+    return base_alpha
 
 
 def _draw_gcode_axis(

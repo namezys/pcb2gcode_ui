@@ -13,6 +13,7 @@ from pcb2gcode_ui.gcode_preview import (
 )
 from pcb2gcode_ui.preview import (
     DEFAULT_PREVIEW_DPMM,
+    GCODE_CUT_ALPHA,
     Bounds,
     DrillHit,
     DrillLayer,
@@ -446,6 +447,95 @@ def test_compose_preview_back_side_alpha_affects_only_back_and_drill():
     expected = Image.new("RGBA", (1, 1), (*front_color, 255))
     expected.alpha_composite(_apply_alpha(Image.new("RGBA", (1, 1), (*back_color, 255)), 50))
     assert image.getpixel((0, 0)) == expected.getpixel((0, 0))
+
+
+def test_compose_preview_front_side_alpha_affects_only_front_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(10, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+            GcodeSegment(
+                GcodePoint(0, 7, -0.1),
+                GcodePoint(-10, 7, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                2,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(0, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+            layer_alpha=50,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((5, 5))[3] == round(GCODE_CUT_ALPHA * 0.5)
+    assert image.getpixel((5, 3))[3] == GCODE_CUT_ALPHA
+
+
+def test_compose_preview_back_side_alpha_affects_only_back_gcode():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 5, -0.1),
+                GcodePoint(10, 5, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+            GcodeSegment(
+                GcodePoint(0, 7, -0.1),
+                GcodePoint(-10, 7, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "back",
+                2,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 10, 10))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(0, 0, 10, 10),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+            layer_alpha=50,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((5, 5))[3] == GCODE_CUT_ALPHA
+    assert image.getpixel((5, 3))[3] == round(GCODE_CUT_ALPHA * 0.5)
 
 
 def test_compose_preview_back_side_mirrors_all_layers_horizontally():
