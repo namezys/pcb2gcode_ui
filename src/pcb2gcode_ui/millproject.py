@@ -22,6 +22,21 @@ def parse_millproject(path: Path) -> dict[str, str]:
     return values
 
 
+def validate_millproject_format(path: Path) -> list[str]:
+    messages: list[str] = []
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if "=" not in line:
+            messages.append(f"Line #{line_number}: expected key=value.")
+            continue
+        key, _value = line.split("=", 1)
+        if not key.strip():
+            messages.append(f"Line #{line_number}: option name is required.")
+    return messages
+
+
 def write_millproject(path: Path, values: dict[str, str]):
     path.write_text(format_millproject(values, path.parent), encoding="utf-8")
 

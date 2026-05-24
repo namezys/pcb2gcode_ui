@@ -8,6 +8,7 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeMovementKind,
     GcodePoint,
     GcodeSegment,
+    GcodeSource,
     GcodeTrace,
 )
 from pcb2gcode_ui.preview import (
@@ -76,6 +77,31 @@ def test_render_preview_can_show_front_and_back():
     assert result.ok
     assert result.layer_count == 2
     assert _layer_color(PreviewLayerKind.FRONT) != _layer_color(PreviewLayerKind.BACK)
+
+
+def test_render_preview_size_stays_stable_when_gerber_layers_are_hidden():
+    values = {
+        "front": "pcb2gcode/extras/example_board/example_board-F.Cu.gbr",
+        "back": "pcb2gcode/extras/example_board/example_board-B.Cu.gbr",
+        "metric": "true",
+    }
+    renderer = GerberPreviewRenderer()
+    visible_result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(show_front=True, show_back=True, show_drill=False, show_cutoff=False),
+    )
+    hidden_result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(show_front=True, show_back=False, show_drill=False, show_cutoff=False),
+    )
+
+    visible_image = Image.open(BytesIO(visible_result.png))
+    hidden_image = Image.open(BytesIO(hidden_result.png))
+
+    assert hidden_image.size == visible_image.size
+    assert hidden_result.layer_count == 1
 
 
 def test_compose_preview_places_layers_in_shared_coordinate_system():
@@ -470,6 +496,146 @@ def test_compose_preview_draws_retract_as_dots():
     assert image.getpixel((5, 50))[:3] != (32, 35, 38)
 
 
+def test_compose_preview_draws_front_gcode_axis():
+    trace = GcodeTrace([], [], [], [GcodeSource("front", "front.nc")])
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-1, -1, 5, 5),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((30, 50))[:3] == (210, 216, 222)
+    assert image.getpixel((10, 30))[:3] == (210, 216, 222)
+
+
+def test_compose_preview_draws_back_gcode_axis_mirrored_from_origin():
+    trace = GcodeTrace([], [], [], [GcodeSource("back", "back.nc")])
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-5, -1, 1, 5),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((30, 50))[:3] == (210, 216, 222)
+
+
+def test_compose_preview_mirrors_back_gcode_axis_on_back_side():
+    trace = GcodeTrace([], [], [], [GcodeSource("back", "back.nc")])
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-5, -1, 1, 5),
+        settings,
+        PreviewOptions(
+            side=PreviewSide.BACK,
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((30, 50))[:3] == (210, 216, 222)
+
+
+def test_compose_preview_scales_gcode_axis_from_largest_trace_size():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 1, -0.1),
+                GcodePoint(100, 1, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc")],
+    )
+    settings = _preview_settings(Bounds(0, 0, 100, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-1, -1, 101, 27),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=1,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((1, 10))[:3] == (210, 216, 222)
+
+
+def test_compose_preview_draws_gcode_paths_over_axis():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(4, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc")],
+    )
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    image = _compose_preview(
+        [],
+        None,
+        Bounds(-1, -1, 5, 5),
+        settings,
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=10,
+        ),
+        trace,
+    )
+
+    assert image.getpixel((30, 50))[:3] == (255, 214, 78)
+
+
 def test_compose_preview_back_side_mirrors_gcode_horizontally():
     trace = GcodeTrace(
         [
@@ -545,7 +711,6 @@ def test_compose_preview_mirrors_back_gcode_on_front_side():
     )
 
     assert image.getpixel((1, 5))[:3] != (32, 35, 38)
-    assert image.getpixel((9, 5))[:3] == (32, 35, 38)
 
 
 def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
@@ -581,7 +746,6 @@ def test_compose_preview_back_side_mirrors_back_gcode_with_layout():
     )
 
     assert image.getpixel((10, 5))[:3] != (32, 35, 38)
-    assert image.getpixel((1, 5))[:3] == (32, 35, 38)
 
 
 def test_transformed_bounds_include_origin_mirrored_back_gcode():
@@ -602,8 +766,91 @@ def test_transformed_bounds_include_origin_mirrored_back_gcode():
 
     bounds = _transformed_bounds([], None, settings, trace)
 
-    assert bounds.min_x == -4
+    assert bounds.min_x == -6
     assert bounds.max_x == 2
+
+
+def test_transformed_bounds_include_empty_gcode_source_axis():
+    trace = GcodeTrace([], [], [], [GcodeSource("front", "front.nc")])
+    settings = _preview_settings(Bounds(0, 0, 4, 4))
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds.min_x == -2
+    assert bounds.min_y == -2
+    assert bounds.max_x == 6
+    assert bounds.max_y == 6
+
+
+def test_transformed_bounds_scale_gcode_axis_from_largest_trace_size():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(100, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+    )
+    settings = _preview_settings(Bounds(0, 0, 100, 1))
+
+    bounds = _transformed_bounds([], None, settings, trace)
+
+    assert bounds.max_y == 27
+
+
+def test_render_preview_size_stays_stable_when_gcode_is_hidden():
+    trace = GcodeTrace(
+        [
+            GcodeSegment(
+                GcodePoint(0, 0, -0.1),
+                GcodePoint(100, 0, -0.1),
+                GcodeMovementKind.CUT,
+                "1",
+                "front",
+                1,
+            ),
+        ],
+        [],
+        [],
+        [GcodeSource("front", "front.nc")],
+    )
+    values = {"front": "pcb2gcode/extras/example_board/example_board-F.Cu.gbr", "metric": "true"}
+    renderer = GerberPreviewRenderer()
+    visible_result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            show_front=True,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            gcode_trace=trace,
+            dpmm=1,
+        ),
+    )
+    hidden_result = renderer.render(
+        values,
+        Path.cwd(),
+        PreviewOptions(
+            show_front=True,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=False,
+            gcode_trace=trace,
+            dpmm=1,
+        ),
+    )
+
+    visible_image = Image.open(BytesIO(visible_result.png))
+    hidden_image = Image.open(BytesIO(hidden_result.png))
+
+    assert hidden_image.size == visible_image.size
+    assert hidden_result.layer_count == 1
 
 
 def test_compose_preview_does_not_mirror_back_layer():

@@ -85,7 +85,8 @@ PREVIEW_HELP = GeneralHelp(
         "zero-start, and tiling. G-code preview is a visual aid: it currently draws linear "
         "`G0`/`G1` movement only, treats a segment as a cut when either endpoint has "
         "`Z < 0`, colors paths by active tool id per NC file, and keeps generated NC files as "
-        "the source of truth. The overlay table omits tools with only pass/retract moves."
+        "the source of truth. Each loaded NC file also gets its own origin axis with `X+` and "
+        "`Y+` labels. The overlay table omits tools with only pass/retract moves."
     ),
 )
 
@@ -106,6 +107,8 @@ PREVIEW_COLOR_LEGEND: tuple[PreviewColorLegendEntry, ...] = (
     ),
     PreviewColorLegendEntry("Outline G-code cuts", "#FFFFFF", "Cutting moves from outline NC."),
     PreviewColorLegendEntry("Retract / travel G-code", "#AAB2B8", "Low-alpha non-cutting moves."),
+    PreviewColorLegendEntry("NC X+ axis", "#FF5C5C", "Positive X direction for each NC file."),
+    PreviewColorLegendEntry("NC Y+ axis", "#5FDC78", "Positive Y direction for each NC file."),
 )
 
 

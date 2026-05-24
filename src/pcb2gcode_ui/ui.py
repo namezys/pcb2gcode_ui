@@ -20,7 +20,11 @@ from pcb2gcode_ui.help_content import (
     PreviewColorLegendEntry,
     option_help_markdown,
 )
-from pcb2gcode_ui.millproject import parse_millproject, write_millproject
+from pcb2gcode_ui.millproject import (
+    parse_millproject,
+    validate_millproject_format,
+    write_millproject,
+)
 from pcb2gcode_ui.options import (
     FILE_OPTIONS,
     OPTION_SPECS,
@@ -755,9 +759,19 @@ class Pcb2GCodeApp:
             self._set_output("Selected millproject has no local filesystem path.")
             return
         path = Path(selected_path)
+        format_messages = validate_millproject_format(path)
+        if format_messages:
+            self._set_output(_format_open_format_error(path, format_messages))
+            return
+        values = parse_millproject(path)
+        messages = validate_values(values)
+        if messages:
+            self._show_validation_messages(messages)
+            self._set_output(_format_open_validation_error(path, messages))
+            return
         self.current_millproject = path
         self._set_working_directory(path.parent)
-        self.values = parse_millproject(path)
+        self.values = values
         for key, value in self.values.items():
             self._set_value(key, value)
         self._set_default_output_dir()
@@ -1141,6 +1155,18 @@ def _offset_y(offset) -> float:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(value, maximum))
+
+
+def _format_open_validation_error(path: Path, messages: list[ValidationMessage]) -> str:
+    lines = [f"Invalid millproject file: {path}", ""]
+    lines.extend(f"{SPEC_BY_KEY[message.key].label}: {message.text}" for message in messages)
+    return "\n".join(lines)
+
+
+def _format_open_format_error(path: Path, messages: list[str]) -> str:
+    lines = [f"Invalid millproject file format: {path}", ""]
+    lines.extend(messages)
+    return "\n".join(lines)
 
 
 def _tab_label(text: str) -> ft.Text:

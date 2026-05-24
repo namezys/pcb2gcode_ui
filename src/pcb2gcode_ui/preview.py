@@ -7,7 +7,7 @@ from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from pygerber.gerberx3.api.v2 import (
     ColorScheme,
     FileTypeEnum,
@@ -19,6 +19,8 @@ from pygerber.gerberx3.api.v2 import (
 
 from pcb2gcode_ui.gcode_preview import (
     GcodeMovementKind,
+    GcodePoint,
+    GcodeSource,
     GcodeTrace,
     gcode_instrument_color,
     gcode_tool_path_id,
@@ -52,6 +54,13 @@ GCODE_CUT_ALPHA = 235
 GCODE_RETRACT_ALPHA = 175
 GCODE_RETRACT_WIDTH_MM = 0.05
 GCODE_RETRACT_GAP_MM = 0.18
+GCODE_AXIS_MIN_LENGTH_MM = 4.0
+GCODE_AXIS_MAX_LENGTH_RATIO = 0.25
+GCODE_AXIS_LABEL_STEP_PX = 120
+GCODE_AXIS_FONT_SIZE = 110
+GCODE_AXIS_COLOR = (210, 216, 222, 230)
+GCODE_AXIS_LABEL_COLOR = (245, 245, 245, 240)
+GCODE_AXIS_ORIGIN_COLOR = (245, 245, 245, 255)
 
 
 class PreviewSide(StrEnum):
@@ -197,23 +206,31 @@ class GerberPreviewRenderer:
     ) -> PreviewResult:
         LOGGER.debug("Rendering preview with options %r", options)
         warnings: list[str] = []
-        gerber_layers = _collect_gerber_layers(values, base_dir, options, warnings)
-        drill_layer = _collect_drill_layer(values, base_dir, options, warnings)
+        all_gerber_layers = _collect_all_gerber_layers(values, base_dir, options)
+        visible_gerber_layers = _filter_visible_gerber_layers(all_gerber_layers, options, warnings)
+        all_drill_layer = _collect_drill_layer(values, base_dir)
+        drill_layer = all_drill_layer if options.show_drill else None
+        if drill_layer:
+            warnings.extend(drill_layer.warnings)
         gcode_trace = options.gcode_trace if options.show_gcode else None
-        if not gerber_layers and not drill_layer and not _has_gcode(gcode_trace):
+        if not visible_gerber_layers and not drill_layer and not _has_gcode(gcode_trace):
             return PreviewResult(b"", warnings or ["No visible preview layers."], 0)
 
-        rendered_layers = self._render_gerber_layers(gerber_layers, options, warnings)
-        source_bounds = _source_bounds(rendered_layers, drill_layer, gcode_trace)
+        all_rendered_layers = self._render_gerber_layers(all_gerber_layers, options, warnings)
+        visible_layer_kinds = {layer.kind for layer in visible_gerber_layers}
+        rendered_layers = [
+            layer for layer in all_rendered_layers if layer.kind in visible_layer_kinds
+        ]
+        source_bounds = _source_bounds(all_rendered_layers, all_drill_layer, options.gcode_trace)
         if not source_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
 
         settings = _transform_settings(values, source_bounds)
         transformed_bounds = _transformed_bounds(
-            rendered_layers,
-            drill_layer,
+            all_rendered_layers,
+            all_drill_layer,
             settings,
-            gcode_trace,
+            options.gcode_trace,
         )
         if not transformed_bounds:
             return PreviewResult(b"", warnings or ["No renderable preview content."], 0)
@@ -305,51 +322,43 @@ class GerberPreviewRenderer:
         return parsed_file
 
 
-def _collect_gerber_layers(
+def _collect_all_gerber_layers(
     values: dict[str, str],
     base_dir: Path,
     options: PreviewOptions,
-    warnings: list[str],
 ) -> list[GerberLayer]:
     layers: list[GerberLayer] = []
-    if options.show_front:
-        path = _path_value(values, "front", base_dir)
-        if path:
-            layers.append(
-                GerberLayer(
-                    path,
-                    PreviewLayerKind.FRONT,
-                    FileTypeEnum.COPPER,
-                    ColorScheme.DEFAULT_GRAYSCALE,
-                )
+    path = _path_value(values, "front", base_dir)
+    if path:
+        layers.append(
+            GerberLayer(
+                path,
+                PreviewLayerKind.FRONT,
+                FileTypeEnum.COPPER,
+                ColorScheme.DEFAULT_GRAYSCALE,
             )
-        else:
-            warnings.append("No front Gerber file selected.")
-    if options.show_back:
-        path = _path_value(values, "back", base_dir)
-        if path:
-            layers.append(
-                GerberLayer(
-                    path,
-                    PreviewLayerKind.BACK,
-                    FileTypeEnum.COPPER,
-                    ColorScheme.DEFAULT_GRAYSCALE,
-                )
+        )
+    path = _path_value(values, "back", base_dir)
+    if path:
+        layers.append(
+            GerberLayer(
+                path,
+                PreviewLayerKind.BACK,
+                FileTypeEnum.COPPER,
+                ColorScheme.DEFAULT_GRAYSCALE,
             )
-        else:
-            warnings.append("No back Gerber file selected.")
-    if options.show_cutoff:
-        path = _path_value(values, "outline", base_dir)
-        if path:
-            layers.append(
-                GerberLayer(
-                    path,
-                    PreviewLayerKind.CUTOFF,
-                    FileTypeEnum.EDGE,
-                    ColorScheme.DEFAULT_GRAYSCALE,
-                )
+        )
+    path = _path_value(values, "outline", base_dir)
+    if path:
+        layers.append(
+            GerberLayer(
+                path,
+                PreviewLayerKind.CUTOFF,
+                FileTypeEnum.EDGE,
+                ColorScheme.DEFAULT_GRAYSCALE,
             )
-    if options.show_aux and options.aux_layer:
+        )
+    if options.aux_layer:
         layers.append(
             GerberLayer(
                 _resolve_path(str(options.aux_layer), base_dir),
@@ -361,20 +370,38 @@ def _collect_gerber_layers(
     return layers
 
 
+def _filter_visible_gerber_layers(
+    layers: list[GerberLayer],
+    options: PreviewOptions,
+    warnings: list[str],
+) -> list[GerberLayer]:
+    visible_kinds: set[PreviewLayerKind] = set()
+    if options.show_front:
+        visible_kinds.add(PreviewLayerKind.FRONT)
+    if options.show_back:
+        visible_kinds.add(PreviewLayerKind.BACK)
+    if options.show_cutoff:
+        visible_kinds.add(PreviewLayerKind.CUTOFF)
+    if options.show_aux:
+        visible_kinds.add(PreviewLayerKind.AUX)
+
+    layers_by_kind = {layer.kind: layer for layer in layers}
+    if options.show_front and PreviewLayerKind.FRONT not in layers_by_kind:
+        warnings.append("No front Gerber file selected.")
+    if options.show_back and PreviewLayerKind.BACK not in layers_by_kind:
+        warnings.append("No back Gerber file selected.")
+
+    return [layer for layer in layers if layer.kind in visible_kinds]
+
+
 def _collect_drill_layer(
     values: dict[str, str],
     base_dir: Path,
-    options: PreviewOptions,
-    warnings: list[str],
 ) -> DrillLayer | None:
-    if not options.show_drill:
-        return None
     path = _path_value(values, "drill", base_dir)
     if not path:
         return None
-    drill_layer = _parse_drill_file(path)
-    warnings.extend(drill_layer.warnings)
-    return drill_layer
+    return _parse_drill_file(path)
 
 
 def _parse_drill_file(path: Path) -> DrillLayer:
@@ -658,7 +685,7 @@ def _source_bounds(
     if drill_layer and drill_layer.hits:
         drill_bounds = _drill_bounds(drill_layer.hits)
         bounds = drill_bounds if bounds is None else bounds.expand(drill_bounds)
-    if _has_gcode(gcode_trace):
+    if _has_gcode_preview(gcode_trace):
         trace_bounds = _gcode_bounds(gcode_trace)
         bounds = trace_bounds if bounds is None else bounds.expand(trace_bounds)
     return bounds
@@ -707,12 +734,22 @@ def _transformed_bounds(
             max(point[1] for point in points),
         )
         bounds = drill_bounds if bounds is None else bounds.expand(drill_bounds)
-    if _has_gcode(gcode_trace):
-        points = [
+    if _has_gcode_preview(gcode_trace):
+        segment_points = [
             _transform_gcode_point(point.x_mm, point.y_mm, segment.source_kind, settings)
             for segment in gcode_trace.segments
             for point in (segment.start, segment.end)
         ]
+        axis_points = [
+            point
+            for source in gcode_trace.sources
+            for point in _transformed_gcode_axis_points(
+                source,
+                settings,
+                _gcode_axis_length(gcode_trace),
+            )
+        ]
+        points = [*segment_points, *axis_points]
         trace_bounds = Bounds(
             min(point[0] for point in points),
             min(point[1] for point in points),
@@ -779,7 +816,7 @@ def _compose_preview(
         for layer in rendered_layers:
             if layer.kind == layer_kind:
                 _draw_rendered_layer(board_image, layer, bounds, settings, options)
-    if options.show_gcode and _has_gcode(gcode_trace):
+    if options.show_gcode and _has_gcode_preview(gcode_trace):
         _draw_gcode_trace(board_image, gcode_trace, bounds, settings, options)
     return _tile_image(board_image, settings.tile_x, settings.tile_y)
 
@@ -884,6 +921,16 @@ def _draw_gcode_trace(
         tool_path.id: _hex_to_rgba(gcode_instrument_color(idx), GCODE_CUT_ALPHA)
         for idx, tool_path in enumerate(trace.active_tool_paths)
     }
+    for idx, source in enumerate(trace.sources):
+        _draw_gcode_axis(
+            draw,
+            source,
+            idx,
+            _gcode_axis_length(trace),
+            bounds,
+            settings,
+            options,
+        )
     for segment in trace.segments:
         start = _preview_point(
             segment.start.x_mm,
@@ -920,6 +967,94 @@ def _draw_gcode_trace(
                 width=max(round(options.dpmm * GCODE_RETRACT_WIDTH_MM), 1),
                 gap_px=max(round(options.dpmm * GCODE_RETRACT_GAP_MM), 2),
             )
+
+
+def _draw_gcode_axis(
+    draw: ImageDraw.ImageDraw,
+    source: GcodeSource,
+    idx: int,
+    axis_length: float,
+    bounds: Bounds,
+    settings: TransformSettings,
+    options: PreviewOptions,
+):
+    origin = _preview_point(0, 0, source.kind, bounds, settings, options)
+    x_end = _preview_point(axis_length, 0, source.kind, bounds, settings, options)
+    y_end = _preview_point(0, axis_length, source.kind, bounds, settings, options)
+    line_width = max(round(options.dpmm * 0.12), 4)
+    origin_radius = max(round(options.dpmm * 0.24), 6)
+    font = ImageFont.load_default(size=GCODE_AXIS_FONT_SIZE)
+    _draw_arrow(draw, origin, x_end, GCODE_AXIS_COLOR, line_width)
+    _draw_arrow(draw, origin, y_end, GCODE_AXIS_COLOR, line_width)
+    draw.ellipse(
+        (
+            origin[0] - origin_radius,
+            origin[1] - origin_radius,
+            origin[0] + origin_radius,
+            origin[1] + origin_radius,
+        ),
+        fill=GCODE_AXIS_ORIGIN_COLOR,
+    )
+    _draw_axis_label(draw, "X+", origin, x_end, font)
+    _draw_axis_label(draw, "Y+", origin, y_end, font)
+    draw.text(
+        (
+            origin[0] + GCODE_AXIS_FONT_SIZE * 0.45,
+            origin[1] + GCODE_AXIS_FONT_SIZE * 0.45 + idx * GCODE_AXIS_LABEL_STEP_PX,
+        ),
+        source.label,
+        fill=GCODE_AXIS_LABEL_COLOR,
+        font=font,
+    )
+
+
+def _draw_axis_label(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    font: ImageFont.ImageFont,
+):
+    direction_x = end[0] - start[0]
+    direction_y = end[1] - start[1]
+    length = math.hypot(direction_x, direction_y)
+    if length == 0:
+        return
+    unit_x = direction_x / length
+    forward_margin = GCODE_AXIS_FONT_SIZE * 0.3
+    vertical_margin = GCODE_AXIS_FONT_SIZE * 1.5
+    anchor = (end[0] + unit_x * forward_margin, end[1] - vertical_margin)
+    draw.text(anchor, text, fill=GCODE_AXIS_LABEL_COLOR, font=font)
+
+
+def _draw_arrow(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    fill: tuple[int, int, int, int],
+    width: int,
+):
+    draw.line((start, end), fill=fill, width=width)
+    direction_x = end[0] - start[0]
+    direction_y = end[1] - start[1]
+    length = math.hypot(direction_x, direction_y)
+    if length == 0:
+        return
+    unit_x = direction_x / length
+    unit_y = direction_y / length
+    side_x = -unit_y
+    side_y = unit_x
+    head_length = max(width * 4, 8)
+    head_width = max(width * 2.5, 5)
+    base = (end[0] - unit_x * head_length, end[1] - unit_y * head_length)
+    draw.polygon(
+        [
+            end,
+            (base[0] + side_x * head_width, base[1] + side_y * head_width),
+            (base[0] - side_x * head_width, base[1] - side_y * head_width),
+        ],
+        fill=fill,
+    )
 
 
 def _preview_point(
@@ -1004,9 +1139,55 @@ def _has_gcode(trace: GcodeTrace = None) -> bool:
     return bool(trace and trace.segments)
 
 
+def _has_gcode_preview(trace: GcodeTrace = None) -> bool:
+    return bool(trace and (trace.segments or trace.sources))
+
+
 def _gcode_bounds(trace: GcodeTrace) -> Bounds:
+    segment_points = [
+        point
+        for segment in trace.segments
+        for point in (segment.start, segment.end)
+    ]
+    axis_points = [
+        GcodePoint(x_value, y_value, 0)
+        for _source in trace.sources
+        for x_value, y_value in _raw_gcode_axis_points(_gcode_axis_length(trace))
+    ]
+    points = [*segment_points, *axis_points]
+    return Bounds(
+        min(point.x_mm for point in points),
+        min(point.y_mm for point in points),
+        max(point.x_mm for point in points),
+        max(point.y_mm for point in points),
+    )
+
+
+def _raw_gcode_axis_points(axis_length: float) -> tuple[tuple[float, float], ...]:
+    return (
+        (0, 0),
+        (axis_length, 0),
+        (0, axis_length),
+    )
+
+
+def _transformed_gcode_axis_points(
+    source: GcodeSource,
+    settings: TransformSettings,
+    axis_length: float,
+) -> tuple[tuple[float, float], ...]:
+    return tuple(
+        _transform_gcode_point(x_value, y_value, source.kind, settings)
+        for x_value, y_value in _raw_gcode_axis_points(axis_length)
+    )
+
+
+def _gcode_axis_length(trace: GcodeTrace) -> float:
+    if not trace.segments:
+        return GCODE_AXIS_MIN_LENGTH_MM
     bounds = trace.bounds
-    return Bounds(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y)
+    max_size = max(bounds.max_x - bounds.min_x, bounds.max_y - bounds.min_y)
+    return max(GCODE_AXIS_MIN_LENGTH_MM, max_size * GCODE_AXIS_MAX_LENGTH_RATIO)
 
 
 def _tile_image(image: Image.Image, tile_x: int, tile_y: int) -> Image.Image:

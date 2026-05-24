@@ -4,6 +4,7 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeInstrument,
     GcodeInterpreter,
     GcodeMovementKind,
+    GcodeSource,
     GcodeToolPath,
     GcodeTrace,
     load_gcode_trace,
@@ -154,6 +155,13 @@ def test_interpreter_ignores_unsupported_commands_once():
     ]
 
 
+def test_interpreter_records_source_for_empty_file():
+    trace = GcodeInterpreter().parse("", "front", "front.nc")
+
+    assert trace.segments == []
+    assert trace.sources == [GcodeSource("front", "front.nc")]
+
+
 def test_load_gcode_trace_reads_configured_output_files(tmp_path: Path):
     output_dir = tmp_path / "nc"
     output_dir.mkdir()
@@ -176,6 +184,7 @@ def test_load_gcode_trace_reads_configured_output_files(tmp_path: Path):
     assert trace.active_tool_paths == (
         GcodeToolPath("front:3", "3", "front", "front.nc", 0, 3),
     )
+    assert trace.sources == [GcodeSource("front", "front.nc")]
     assert trace.instruments == [GcodeInstrument("front-1", "3", "front", 1, 2)]
     assert any("Missing back NC file" in warning for warning in trace.warnings)
 
@@ -187,10 +196,12 @@ def test_trace_filter_keeps_requested_source_only():
         [*trace.segments, *other.segments],
         [],
         [*trace.instruments, *other.instruments],
+        [*trace.sources, *other.sources],
     )
 
     filtered = combined.filtered({"back"})
 
     assert len(filtered.segments) == 1
     assert filtered.segments[0].source_kind == "back"
+    assert filtered.sources == other.sources
     assert filtered.active_instruments == tuple(other.instruments)

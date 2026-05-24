@@ -75,8 +75,11 @@ small local movement interpreter. It draws only linear `G0`/`G1` traces: a segme
 either endpoint has `Z < 0`; otherwise it is a retract/travel move. Cut lines are solid;
 retract/travel lines are dotted. The preview colors paths by active tool id per NC file and
 mirrors back NC output the same way as the back Gerber layer. It overlays a tool table for active
-NC files. The tool table labels each NC file group and omits tools that contain only pass/retract
-moves. See [gcode-preview.md](gcode-preview.md) for the supported subset.
+NC files. Each loaded NC file also gets its own origin axis with labeled positive X and Y
+directions. The preview bounds are calculated from all configured Gerber/drill/Aux files and
+loaded NC files, so toggling layer checkboxes does not resize the image. The tool table labels
+each NC file group and omits tools that contain only pass/retract moves. See
+[gcode-preview.md](gcode-preview.md) for the supported subset.
 
 ## Validation
 

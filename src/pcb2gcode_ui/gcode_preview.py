@@ -72,6 +72,12 @@ class GcodeInstrument:
 
 
 @dataclass(frozen=True)
+class GcodeSource:
+    kind: str
+    label: str
+
+
+@dataclass(frozen=True)
 class GcodeToolPath:
     id: str
     tool_id: str
@@ -94,6 +100,7 @@ class GcodeTrace:
     segments: list[GcodeSegment]
     warnings: list[str]
     instruments: list[GcodeInstrument] = None
+    sources: list[GcodeSource] = None
 
     def __post_init__(self):
         instruments = self.instruments or []
@@ -109,6 +116,8 @@ class GcodeTrace:
                 "instruments",
                 [*instruments, *_implicit_instruments(missing_segments)],
             )
+        if self.sources is None:
+            object.__setattr__(self, "sources", _implicit_sources(self.segments))
 
     @property
     def cut_count(self) -> int:
@@ -142,7 +151,8 @@ class GcodeTrace:
         segments = [segment for segment in self.segments if segment.source_kind in source_kinds]
         instrument_ids = {segment.instrument_id for segment in segments}
         instruments = [item for item in self.instruments if item.id in instrument_ids]
-        return GcodeTrace(segments, self.warnings, instruments)
+        sources = [source for source in self.sources if source.kind in source_kinds]
+        return GcodeTrace(segments, self.warnings, instruments, sources)
 
     @property
     def active_instruments(self) -> tuple[GcodeInstrument, ...]:
@@ -243,7 +253,12 @@ class GcodeInterpreter:
             f"Ignored unsupported command {command}."
             for command in sorted(unsupported_commands)
         )
-        return GcodeTrace(segments, warnings, instruments or None)
+        return GcodeTrace(
+            segments,
+            warnings,
+            instruments or None,
+            [GcodeSource(source_kind, source_label or source_kind)],
+        )
 
     def _process_line(
         self,
@@ -364,6 +379,7 @@ def load_gcode_trace(
     interpreter = GcodeInterpreter()
     segments: list[GcodeSegment] = []
     instruments: list[GcodeInstrument] = []
+    sources: list[GcodeSource] = []
     warnings: list[str] = []
     for source_kind, option_key in OUTPUT_OPTIONS:
         if source_kinds and source_kind not in source_kinds:
@@ -375,8 +391,9 @@ def load_gcode_trace(
         trace = interpreter.parse_file(path, source_kind)
         segments.extend(trace.segments)
         instruments.extend(trace.instruments)
+        sources.extend(trace.sources)
         warnings.extend(trace.warnings)
-    return GcodeTrace(segments, warnings, instruments)
+    return GcodeTrace(segments, warnings, instruments, sources)
 
 
 def gcode_trace_summary(trace: GcodeTrace) -> str:
@@ -428,6 +445,19 @@ def _implicit_instrument(instrument_id: str, source_kind: str) -> GcodeInstrumen
         change_index=0,
         line_number=0,
     )
+
+
+def _implicit_sources(segments: list[GcodeSegment]) -> list[GcodeSource]:
+    sources: list[GcodeSource] = []
+    seen_kinds: set[str] = set()
+    for segment in segments:
+        if segment.source_kind in seen_kinds:
+            continue
+        seen_kinds.add(segment.source_kind)
+        sources.append(
+            GcodeSource(segment.source_kind, segment.source_label or segment.source_kind)
+        )
+    return sources
 
 
 def gcode_tool_path_id(source_kind: str, tool_id: str) -> str:

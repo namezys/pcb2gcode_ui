@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from pcb2gcode_ui.millproject import format_millproject, parse_millproject
+from pcb2gcode_ui.millproject import (
+    format_millproject,
+    parse_millproject,
+    validate_millproject_format,
+)
 
 
 def test_parse_millproject_reads_known_options_and_ignores_comments(tmp_path: Path):
@@ -20,6 +24,36 @@ unknown=value
     assert values["metric"] == "true"
     assert values["front"] == "board-F.Cu.gbr"
     assert "unknown" not in values
+
+
+def test_validate_millproject_format_rejects_plain_text_file(tmp_path: Path):
+    millproject_path = tmp_path / "notes.txt"
+    millproject_path.write_text(
+        """
+This is not a millproject file.
+metric true
+""",
+        encoding="utf-8",
+    )
+
+    assert validate_millproject_format(millproject_path) == [
+        "Line #2: expected key=value.",
+        "Line #3: expected key=value.",
+    ]
+
+
+def test_validate_millproject_format_allows_comments_blanks_and_unknown_options(tmp_path: Path):
+    millproject_path = tmp_path / "millproject"
+    millproject_path.write_text(
+        """
+# comment
+unknown=value
+zsafe=5 # inline comment
+""",
+        encoding="utf-8",
+    )
+
+    assert validate_millproject_format(millproject_path) == []
 
 
 def test_format_millproject_writes_canonical_groups():

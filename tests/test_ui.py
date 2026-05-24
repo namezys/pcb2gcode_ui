@@ -161,7 +161,7 @@ def test_set_working_directory_persists_last_directory(tmp_path: Path, monkeypat
 
 def test_open_file_awaits_picker_and_loads_millproject(tmp_path: Path):
     millproject_path = tmp_path / "millproject"
-    millproject_path.write_text("metric=true\nzsafe=5\n", encoding="utf-8")
+    millproject_path.write_text("metric=true\nzsafe=5\nzchange=10\n", encoding="utf-8")
     start_path = tmp_path / "previous"
     app = _app()
     app.working_directory = start_path
@@ -174,6 +174,47 @@ def test_open_file_awaits_picker_and_loads_millproject(tmp_path: Path):
     assert app.file_picker.kwargs["initial_directory"] == str(start_path)
     assert app.values["metric"] == "true"
     assert app.values["zsafe"] == "5"
+    assert app.values["zchange"] == "10"
+
+
+def test_open_file_rejects_invalid_millproject(tmp_path: Path):
+    millproject_path = tmp_path / "millproject"
+    millproject_path.write_text("zsafe=5\n", encoding="utf-8")
+    current_project = tmp_path / "current" / "millproject"
+    start_path = tmp_path / "previous"
+    app = _app()
+    app.current_millproject = current_project
+    app.working_directory = start_path
+    app.values["zsafe"] = "1"
+    app.file_picker = FakeFilePicker([FakeFile(str(millproject_path))])
+    app.controls["zchange"] = ft.TextField()
+
+    asyncio.run(app._open_file(None))
+
+    assert app.current_millproject == current_project
+    assert app.working_directory == start_path
+    assert app.values["zsafe"] == "1"
+    assert app.controls["zchange"].error == "Tool-change Z is required."
+    assert app.command_output.value.startswith("Invalid millproject file:")
+    assert "Tool-change Z: Tool-change Z is required." in app.command_output.value
+
+
+def test_open_file_rejects_plain_text_file(tmp_path: Path):
+    text_path = tmp_path / "notes.txt"
+    text_path.write_text("This is not a millproject file.\n", encoding="utf-8")
+    current_project = tmp_path / "current" / "millproject"
+    start_path = tmp_path / "previous"
+    app = _app()
+    app.current_millproject = current_project
+    app.working_directory = start_path
+    app.file_picker = FakeFilePicker([FakeFile(str(text_path))])
+
+    asyncio.run(app._open_file(None))
+
+    assert app.current_millproject == current_project
+    assert app.working_directory == start_path
+    assert app.command_output.value.startswith("Invalid millproject file format:")
+    assert "Line #1: expected key=value." in app.command_output.value
 
 
 def test_pick_input_file_sets_default_output_directory(tmp_path: Path):

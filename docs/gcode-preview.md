@@ -41,6 +41,15 @@ grouped into an initial `none` tool path, so it remains visible instead of being
 Back NC output is mirrored horizontally into the same board view as the back Gerber layer before
 any whole-layout Back-side view mirror is applied.
 
+Each loaded NC file draws its own coordinate axis at that file's transformed origin. The red
+arrow marks `X+`, the green arrow marks `Y+`, and the filename label identifies which NC file the
+axis belongs to. Existing NC files with no movement still draw an axis; missing NC files only add
+a warning.
+
+Preview bounds are calculated from all configured Gerber, drill, Aux, and loaded NC files, not
+only currently visible layers. This keeps the rendered image size stable when layer checkboxes are
+toggled.
+
 The Preview dialog overlays a tool table on the canvas for the active NC outputs. File groups are
 introduced by labeled separators using the loaded NC filename. The table shows path number, tool
 id, cut segment count, and pass/retract segment count. Pass-only tools are omitted from the table,
