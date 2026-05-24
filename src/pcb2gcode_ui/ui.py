@@ -9,6 +9,7 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeToolPath,
     GcodeTrace,
     gcode_instrument_color,
+    gcode_tool_parameters_label,
     gcode_trace_summary,
     load_gcode_trace,
 )
@@ -497,8 +498,7 @@ class Pcb2GCodeApp:
             [
                 ft.SegmentedButton(
                     segments=[
-                        ft.Segment(value=group, label=_tab_label(group))
-                        for group in tab_groups
+                        ft.Segment(value=group, label=_tab_label(group)) for group in tab_groups
                     ],
                     selected=[tab_groups[0]],
                     on_change=self._select_parameter_group,
@@ -945,7 +945,7 @@ class Pcb2GCodeApp:
             _instrument_overlay_header(),
         ]
         previous_source_label = ""
-        for visible_idx, (idx, tool_path, cut_count, retract_count) in enumerate(
+        for visible_idx, (idx, tool_path, bit_label, cut_count, retract_count) in enumerate(
             visible_instruments,
             start=1,
         ):
@@ -956,6 +956,7 @@ class Pcb2GCodeApp:
                     color=gcode_instrument_color(idx),
                     path_index=visible_idx,
                     tool_id=tool_path.tool_id,
+                    bit_label=bit_label,
                     cut_count=cut_count,
                     retract_count=retract_count,
                 )
@@ -1186,7 +1187,8 @@ def _instrument_overlay_header() -> ft.Row:
     return ft.Row(
         [
             _small_table_text("Path", 42, TEXT_COLOR),
-            _small_table_text("Tool", 48, TEXT_COLOR),
+            _small_table_text("Tool", 38, TEXT_COLOR),
+            _small_table_text("Bit", 92, TEXT_COLOR),
             _small_table_text("Cut", 34, TEXT_COLOR),
             _small_table_text("Pass", 42, TEXT_COLOR),
         ],
@@ -1198,13 +1200,15 @@ def _instrument_overlay_row(
     color: str,
     path_index: int,
     tool_id: str,
+    bit_label: str,
     cut_count: int,
     retract_count: int,
 ) -> ft.Row:
     return ft.Row(
         [
             _small_table_text(str(path_index), 42, color),
-            _small_table_text(tool_id, 48, MUTED_TEXT_COLOR),
+            _small_table_text(tool_id, 38, MUTED_TEXT_COLOR),
+            _small_table_text(bit_label, 92, MUTED_TEXT_COLOR),
             _small_table_text(str(cut_count), 34, MUTED_TEXT_COLOR),
             _small_table_text(str(retract_count), 42, MUTED_TEXT_COLOR),
         ],
@@ -1224,13 +1228,21 @@ def _instrument_overlay_separator(label: str) -> ft.Container:
 
 def _visible_instrument_rows(
     trace: GcodeTrace,
-) -> list[tuple[int, GcodeToolPath, int, int]]:
-    rows: list[tuple[int, GcodeToolPath, int, int]] = []
+) -> list[tuple[int, GcodeToolPath, str, int, int]]:
+    rows: list[tuple[int, GcodeToolPath, str, int, int]] = []
     for idx, tool_path in enumerate(trace.active_tool_paths):
         cut_count, retract_count = trace.tool_path_counts(tool_path.id)
         if cut_count == 0:
             continue
-        rows.append((idx, tool_path, cut_count, retract_count))
+        rows.append(
+            (
+                idx,
+                tool_path,
+                gcode_tool_parameters_label(trace, tool_path.id),
+                cut_count,
+                retract_count,
+            )
+        )
     return rows
 
 

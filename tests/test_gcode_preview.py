@@ -5,8 +5,10 @@ from pcb2gcode_ui.gcode_preview import (
     GcodeInterpreter,
     GcodeMovementKind,
     GcodeSource,
+    GcodeToolParameters,
     GcodeToolPath,
     GcodeTrace,
+    gcode_tool_parameters_label,
     load_gcode_trace,
 )
 
@@ -63,6 +65,95 @@ def test_interpreter_tracks_m6_but_collects_paths_by_tool():
         GcodeToolPath("front:2", "2", "front", "front", 0, 2),
         GcodeToolPath("front:7", "7", "front", "front", 1, 6),
     )
+
+
+def test_interpreter_reads_tool_parameters_from_comment_before_m6():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "(MSG, Change tool bit to mill diameter 0.50000mm)",
+                "T2 M6",
+                "G1 X1 Z-0.1",
+            ]
+        ),
+        "front",
+    )
+
+    expected_parameters = GcodeToolParameters("mill", "0.5mm")
+    assert trace.instruments == [
+        GcodeInstrument("front-1", "2", "front", 1, 2, expected_parameters)
+    ]
+    assert trace.active_tool_paths == (
+        GcodeToolPath("front:2", "2", "front", "front", 0, 3, expected_parameters),
+    )
+    assert gcode_tool_parameters_label(trace, "front:2") == "mill 0.5mm"
+
+
+def test_interpreter_reads_tool_parameters_from_same_line_comment():
+    trace = GcodeInterpreter().parse(
+        "T4 M6 (MSG, Change tool bit to DRILL diameter 1.00000mm)\nG1 X1 Z-0.1\n",
+        "drill",
+    )
+
+    expected_parameters = GcodeToolParameters("drill", "1mm")
+    assert trace.instruments == [
+        GcodeInstrument("drill-1", "4", "drill", 1, 1, expected_parameters)
+    ]
+    assert gcode_tool_parameters_label(trace, "drill:4") == "drill 1mm"
+
+
+def test_interpreter_consumes_tool_parameters_once():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "(MSG, Change tool bit to mill diameter 0.0500in)",
+                "T2 M6",
+                "G1 X1 Z-0.1",
+                "T3 M6",
+                "G1 X2",
+            ]
+        ),
+        "front",
+    )
+
+    assert trace.instruments[0].parameters == GcodeToolParameters("mill", "0.05in")
+    assert trace.instruments[1].parameters is None
+    assert gcode_tool_parameters_label(trace, "front:2") == "mill 0.05in"
+    assert gcode_tool_parameters_label(trace, "front:3") == "-"
+
+
+def test_interpreter_ignores_unmatched_tool_parameter_comment():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "(MSG, Change tool bit now)",
+                "T2 M6",
+                "G1 X1 Z-0.1",
+            ]
+        ),
+        "front",
+    )
+
+    assert trace.instruments[0].parameters is None
+    assert gcode_tool_parameters_label(trace, "front:2") == "-"
+
+
+def test_tool_parameter_label_is_mixed_for_grouped_tool_path():
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "(MSG, Change tool bit to mill diameter 0.50000mm)",
+                "T2 M6",
+                "G1 X1 Z-0.1",
+                "(MSG, Change tool bit to mill diameter 0.30000mm)",
+                "T2 M6",
+                "G1 X2",
+            ]
+        ),
+        "front",
+    )
+
+    assert gcode_tool_parameters_label(trace, "front:2") == "mixed"
 
 
 def test_interpreter_supports_inch_and_incremental_modes():
@@ -181,9 +272,7 @@ def test_load_gcode_trace_reads_configured_output_files(tmp_path: Path):
     assert len(trace.segments) == 3
     assert trace.tools == ("3",)
     assert {segment.source_label for segment in trace.segments} == {"front.nc"}
-    assert trace.active_tool_paths == (
-        GcodeToolPath("front:3", "3", "front", "front.nc", 0, 3),
-    )
+    assert trace.active_tool_paths == (GcodeToolPath("front:3", "3", "front", "front.nc", 0, 3),)
     assert trace.sources == [GcodeSource("front", "front.nc")]
     assert trace.instruments == [GcodeInstrument("front-1", "3", "front", 1, 2)]
     assert any("Missing back NC file" in warning for warning in trace.warnings)

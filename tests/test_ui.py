@@ -664,8 +664,7 @@ def test_preview_help_opens_control_and_color_legend():
     assert first_color_swatch.bgcolor == "#23DC96"
     assert first_color_cell.controls[1].value == "#23DC96"
     assert any(
-        row.content.controls[0].value == "Retract / travel G-code"
-        for row in legend_table.controls
+        row.content.controls[0].value == "Retract / travel G-code" for row in legend_table.controls
     )
 
 
@@ -711,7 +710,18 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     output_dir = tmp_path / "nc"
     output_dir.mkdir()
     (output_dir / "front.ngc").write_text(
-        "G21\nT1 M6\nG0 X0 Y0 Z1\nG1 Z-0.1\nX1\nT1 M6\nX2\n",
+        "\n".join(
+            [
+                "G21",
+                "(MSG, Change tool bit to mill diameter 0.50000mm)",
+                "T1 M6",
+                "G0 X0 Y0 Z1",
+                "G1 Z-0.1",
+                "X1",
+                "T1 M6",
+                "X2",
+            ]
+        ),
         encoding="utf-8",
     )
     app = _app()
@@ -733,11 +743,13 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     rows = app.gcode_instrument_overlay.content.controls
     assert rows[0].value == "NC tools"
     assert rows[1].controls[0].value == "Path"
+    assert rows[1].controls[2].value == "Bit"
     assert rows[2].content.value == "front.ngc"
     assert rows[3].controls[0].value == "1"
     assert rows[3].controls[1].value == "1"
-    assert rows[3].controls[2].value == "3"
-    assert rows[3].controls[3].value == "1"
+    assert rows[3].controls[2].value == "mill 0.5mm"
+    assert rows[3].controls[3].value == "3"
+    assert rows[3].controls[4].value == "1"
     assert rows[3].controls[0].color == gcode_instrument_color(0)
     assert len(rows) == 4
 
@@ -774,7 +786,7 @@ def test_gcode_instrument_overlay_keeps_initial_tool_path():
     assert rows[2].content.value == "front"
     assert [row.controls[0].value for row in rows[3:]] == ["1"]
     assert [row.controls[1].value for row in rows[3:]] == ["1"]
-    assert rows[3].controls[3].value == "0"
+    assert rows[3].controls[4].value == "0"
 
 
 def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
@@ -790,6 +802,28 @@ def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
     assert rows[2].content.value == "front"
     assert [row.controls[1].value for row in rows[3:]] == ["1"]
     assert trace.retract_count == 1
+
+
+def test_gcode_instrument_overlay_shows_mixed_tool_parameters():
+    app = _app()
+    trace = GcodeInterpreter().parse(
+        "\n".join(
+            [
+                "(MSG, Change tool bit to mill diameter 0.50000mm)",
+                "T1 M6",
+                "G1 X1 Z-0.1",
+                "(MSG, Change tool bit to mill diameter 0.30000mm)",
+                "T1 M6",
+                "G1 X2",
+            ]
+        ),
+        "front",
+    )
+
+    app._set_gcode_instrument_overlay(trace)
+
+    rows = app.gcode_instrument_overlay.content.controls
+    assert rows[3].controls[2].value == "mixed"
 
 
 def test_gcode_visibility_checkbox_controls_render_options():

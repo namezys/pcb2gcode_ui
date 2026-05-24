@@ -19,6 +19,14 @@ MOVEMENT_COMMANDS = {0, 1}
 SUPPORTED_G_CODES = {0, 1, 20, 21, 90, 91}
 SUPPORTED_M_CODES = {6}
 COORDINATE_ONLY_RE = re.compile(r"^\s*[XYZFIJKR][+-]?\d", re.IGNORECASE)
+TOOL_PARAMETER_RE = re.compile(
+    r"Change\s+tool\s+bit\s+to\s+"
+    r"(?P<tool_type>[A-Za-z][A-Za-z0-9_-]*)\s+"
+    r"diameter\s+"
+    r"(?P<diameter>[+-]?\d+(?:\.\d+)?\s*[A-Za-z]*)",
+    re.IGNORECASE,
+)
+DIAMETER_RE = re.compile(r"(?P<number>[+-]?\d+(?:\.\d+)?)(?P<unit>[A-Za-z]*)")
 OUTPUT_OPTIONS = (
     ("front", "front-output"),
     ("back", "back-output"),
@@ -41,6 +49,12 @@ GCODE_INSTRUMENT_COLORS = (
 class GcodeMovementKind(StrEnum):
     CUT = "cut"
     RETRACT = "retract"
+
+
+@dataclass(frozen=True)
+class GcodeToolParameters:
+    tool_type: str
+    diameter: str
 
 
 @dataclass(frozen=True)
@@ -69,6 +83,7 @@ class GcodeInstrument:
     source_kind: str
     change_index: int
     line_number: int
+    parameters: GcodeToolParameters = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +100,7 @@ class GcodeToolPath:
     source_label: str
     order_index: int
     line_number: int
+    parameters: GcodeToolParameters = None
 
 
 @dataclass(frozen=True)
@@ -125,9 +141,7 @@ class GcodeTrace:
 
     @property
     def retract_count(self) -> int:
-        return sum(
-            1 for segment in self.segments if segment.movement == GcodeMovementKind.RETRACT
-        )
+        return sum(1 for segment in self.segments if segment.movement == GcodeMovementKind.RETRACT)
 
     @property
     def tools(self) -> tuple[str, ...]:
@@ -135,11 +149,7 @@ class GcodeTrace:
 
     @property
     def bounds(self) -> GcodeBounds:
-        points = [
-            point
-            for segment in self.segments
-            for point in (segment.start, segment.end)
-        ]
+        points = [point for segment in self.segments for point in (segment.start, segment.end)]
         return GcodeBounds(
             min(point.x_mm for point in points),
             min(point.y_mm for point in points),
@@ -184,6 +194,7 @@ class GcodeTrace:
                     source_label=segment.source_label or segment.source_kind,
                     order_index=len(tool_paths),
                     line_number=segment.line_number,
+                    parameters=self.tool_path_parameters(id),
                 )
             )
         return tuple(tool_paths)
@@ -200,6 +211,21 @@ class GcodeTrace:
         )
         return cut_count, retract_count
 
+    def tool_path_parameters(self, tool_path_id: str) -> GcodeToolParameters:
+        instrument_ids = {
+            segment.instrument_id
+            for segment in self.segments
+            if gcode_tool_path_id(segment.source_kind, segment.tool_id) == tool_path_id
+        }
+        parameters = {
+            instrument.parameters
+            for instrument in self.instruments
+            if instrument.id in instrument_ids and instrument.parameters
+        }
+        if len(parameters) == 1:
+            return parameters.pop()
+        return None
+
 
 @dataclass
 class InterpreterState:
@@ -211,6 +237,7 @@ class InterpreterState:
     active_instrument_id: str = IMPLICIT_INSTRUMENT_ID
     source_label: str = ""
     tool_change_count: int = 0
+    pending_tool_parameters: GcodeToolParameters = None
 
 
 class GcodeInterpreter:
@@ -238,6 +265,9 @@ class GcodeInterpreter:
         unsupported_commands: set[str] = set()
 
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
+            tool_parameters = _parse_tool_parameters(raw_line)
+            if tool_parameters:
+                state.pending_tool_parameters = tool_parameters
             line = _normalize_modal_line(raw_line, state.active_movement)
             for parsed_line in parse_gcode_lines(line):
                 self._process_line(
@@ -250,8 +280,7 @@ class GcodeInterpreter:
                     unsupported_commands,
                 )
         warnings.extend(
-            f"Ignored unsupported command {command}."
-            for command in sorted(unsupported_commands)
+            f"Ignored unsupported command {command}." for command in sorted(unsupported_commands)
         )
         return GcodeTrace(
             segments,
@@ -340,8 +369,10 @@ class GcodeInterpreter:
                 source_kind=source_kind,
                 change_index=state.tool_change_count,
                 line_number=line_number,
+                parameters=state.pending_tool_parameters,
             )
         )
+        state.pending_tool_parameters = None
         state.active_instrument_id = instrument_id
 
     def _move(
@@ -408,6 +439,25 @@ def gcode_instrument_color(index: int) -> str:
     return GCODE_INSTRUMENT_COLORS[index % len(GCODE_INSTRUMENT_COLORS)]
 
 
+def gcode_tool_parameters_label(trace: GcodeTrace, tool_path_id: str) -> str:
+    instrument_ids = {
+        segment.instrument_id
+        for segment in trace.segments
+        if gcode_tool_path_id(segment.source_kind, segment.tool_id) == tool_path_id
+    }
+    parameters = {
+        instrument.parameters
+        for instrument in trace.instruments
+        if instrument.id in instrument_ids and instrument.parameters
+    }
+    if not parameters:
+        return "-"
+    if len(parameters) > 1:
+        return "mixed"
+    item = parameters.pop()
+    return f"{item.tool_type} {item.diameter}"
+
+
 def _movement_kind(start: GcodePoint, end: GcodePoint) -> GcodeMovementKind:
     if start.z_mm < 0 or end.z_mm < 0:
         return GcodeMovementKind.CUT
@@ -426,11 +476,30 @@ def _format_tool_id(value: float) -> str:
     return str(value)
 
 
+def _parse_tool_parameters(raw_line: str) -> GcodeToolParameters | None:
+    match = TOOL_PARAMETER_RE.search(raw_line)
+    if not match:
+        return None
+    return GcodeToolParameters(
+        tool_type=match.group("tool_type").lower(),
+        diameter=_normalize_diameter(match.group("diameter")),
+    )
+
+
+def _normalize_diameter(value: str) -> str:
+    compact_value = re.sub(r"\s+", "", value).lower()
+    match = DIAMETER_RE.fullmatch(compact_value)
+    if not match:
+        return compact_value
+    number = match.group("number")
+    unit = match.group("unit")
+    if "." in number:
+        number = number.rstrip("0").rstrip(".")
+    return f"{number}{unit}"
+
+
 def _implicit_instruments(segments: list[GcodeSegment]) -> list[GcodeInstrument]:
-    source_by_instrument = {
-        segment.instrument_id: segment.source_kind
-        for segment in segments
-    }
+    source_by_instrument = {segment.instrument_id: segment.source_kind for segment in segments}
     return [
         _implicit_instrument(instrument_id, source_kind)
         for instrument_id, source_kind in sorted(source_by_instrument.items())

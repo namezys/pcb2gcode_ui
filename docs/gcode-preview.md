@@ -16,6 +16,10 @@ Supported state:
 - `M6` as a tool-change instruction for low-level parsing. Preview colors and the overlay table
   are collected by active tool id, so repeated `M6` commands for the same `Tn` stay in one tool
   path group.
+- pcb2gcode tool-change messages in the form
+  `(MSG, Change tool bit to mill diameter 0.50000mm)`. The preview reads only the tool type
+  and diameter, attaches them to the next `M6`, and normalizes display-only trailing zeros
+  such as `0.50000mm` to `0.5mm`.
 - Modal `G0`/`G1` movement, including coordinate-only continuation lines.
 
 Supported movement:
@@ -52,9 +56,9 @@ toggled.
 
 The Preview dialog overlays a tool table on the canvas for the active NC outputs. File groups are
 introduced by labeled separators using the loaded NC filename. The table shows path number, tool
-id, cut segment count, and pass/retract segment count. Pass-only tools are omitted from the table,
-but their dotted travel paths remain visible on the canvas. The path number uses the same color as
-the rendered tool path.
+id, parsed bit type/diameter, cut segment count, and pass/retract segment count. Pass-only tools
+are omitted from the table, but their dotted travel paths remain visible on the canvas. The path
+number uses the same color as the rendered tool path.
 
 ## Output Files
 
