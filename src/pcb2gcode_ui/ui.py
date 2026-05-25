@@ -38,7 +38,11 @@ from pcb2gcode_ui.options import (
     default_output_directory,
     default_values,
 )
-from pcb2gcode_ui.postprocess import POST_REMOVE_T_KEY, post_process_generated_files
+from pcb2gcode_ui.postprocess import (
+    POST_ORIGIN_BEFORE_M3_KEY,
+    POST_REMOVE_T_KEY,
+    post_process_generated_files,
+)
 from pcb2gcode_ui.preprocess import (
     PRE_ALIGN_DRILL_SOURCE_KEY,
     PRE_ALIGN_DRILLS_KEY,
@@ -70,6 +74,7 @@ FIELD_WIDTH = 520
 PROFILE_FIELD_WIDTH = 190
 PROFILE_DESCRIPTION_WIDTH = 360
 BUTTON_WIDTH = 140
+COMMAND_HISTORY_SEPARATOR = "\n\n---\n\n"
 WINDOW_WIDTH = 1000
 WINDOW_HEIGHT = 720
 WINDOW_MIN_WIDTH = 700
@@ -270,6 +275,7 @@ class Pcb2GCodeApp:
         self._update_generation_status()
         self.group_container = ft.Column(spacing=8)
         self.group_controls: dict[str, ft.Control] = {}
+        self.command_history_blocks: list[str] = []
         self.command_output = ft.TextField(
             label="Command output",
             multiline=True,
@@ -322,47 +328,61 @@ class Pcb2GCodeApp:
     def _build_toolbar(self) -> ft.Control:
         return ft.Row(
             [
-                ft.FilledButton(
-                    "Open Millproject", icon=ft.Icons.FOLDER_OPEN, on_click=self._open_file
+                ft.Row(
+                    [
+                        ft.FilledButton(
+                            "Open Millproject",
+                            icon=ft.Icons.FOLDER_OPEN,
+                            on_click=self._open_file,
+                        ),
+                        ft.OutlinedButton(
+                            "Save", icon=ft.Icons.SAVE, on_click=self._save, style=_button_style()
+                        ),
+                        ft.OutlinedButton(
+                            "Save As",
+                            icon=ft.Icons.SAVE_AS,
+                            on_click=self._save_as,
+                            style=_button_style(),
+                        ),
+                        ft.OutlinedButton(
+                            "Set Default",
+                            icon=ft.Icons.STAR,
+                            on_click=self._set_default_millproject,
+                            style=_button_style(),
+                        ),
+                        ft.OutlinedButton(
+                            "Reset to Default",
+                            icon=ft.Icons.RESTART_ALT,
+                            on_click=self._reset_to_default_millproject,
+                            style=_button_style(),
+                        ),
+                        ft.OutlinedButton(
+                            "Validate",
+                            icon=ft.Icons.CHECK,
+                            on_click=self._validate,
+                            style=_button_style(),
+                        ),
+                        ft.OutlinedButton(
+                            "Preview",
+                            icon=ft.Icons.IMAGE_SEARCH,
+                            on_click=self._open_preview,
+                            style=_button_style(),
+                        ),
+                        ft.OutlinedButton(
+                            "Help",
+                            icon=ft.Icons.HELP_OUTLINE,
+                            on_click=self._open_general_help,
+                            style=_button_style(),
+                        ),
+                        self.profile_dropdown,
+                        self.profile_description,
+                    ],
+                    wrap=True,
+                    expand=True,
                 ),
-                ft.OutlinedButton(
-                    "Save", icon=ft.Icons.SAVE, on_click=self._save, style=_button_style()
-                ),
-                ft.OutlinedButton(
-                    "Save As", icon=ft.Icons.SAVE_AS, on_click=self._save_as, style=_button_style()
-                ),
-                ft.OutlinedButton(
-                    "Set Default",
-                    icon=ft.Icons.STAR,
-                    on_click=self._set_default_millproject,
-                    style=_button_style(),
-                ),
-                ft.OutlinedButton(
-                    "Reset to Default",
-                    icon=ft.Icons.RESTART_ALT,
-                    on_click=self._reset_to_default_millproject,
-                    style=_button_style(),
-                ),
-                ft.OutlinedButton(
-                    "Validate", icon=ft.Icons.CHECK, on_click=self._validate, style=_button_style()
-                ),
-                ft.OutlinedButton(
-                    "Preview",
-                    icon=ft.Icons.IMAGE_SEARCH,
-                    on_click=self._open_preview,
-                    style=_button_style(),
-                ),
-                ft.OutlinedButton(
-                    "Help",
-                    icon=ft.Icons.HELP_OUTLINE,
-                    on_click=self._open_general_help,
-                    style=_button_style(),
-                ),
-                self.profile_dropdown,
-                self.profile_description,
                 ft.FilledButton("Generate NC", icon=ft.Icons.PLAY_ARROW, on_click=self._generate),
             ],
-            wrap=True,
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         )
 
     def _build_summary(self) -> ft.Control:
@@ -977,7 +997,7 @@ class Pcb2GCodeApp:
             self._set_output("\n".join(message.text for message in messages))
             return
         result = validate_with_binary(self.values, base_dir=self._base_dir())
-        self._set_command_result(result)
+        self._append_command_result("Validate", result)
 
     def _generate(self, _event):
         messages = validate_values(self.values)
@@ -992,26 +1012,23 @@ class Pcb2GCodeApp:
                 first_pass_values,
                 base_dir=self._base_dir(),
             )
+            self._append_command_result("Pre-process outline generation", first_generation_result)
             if not first_generation_result.ok:
-                self._set_command_result(first_generation_result)
                 return
             try:
                 pre_process_plan = self._build_align_drills_plan(first_pass_values)
             except (OSError, ValueError) as error:
-                self._set_command_result(
-                    CommandResult(
-                        first_generation_result.command,
-                        1,
-                        f"{first_generation_result.output}\n\nPre-process failed: {error}",
-                    )
-                )
+                self._append_process_log("Pre-process", f"Pre-process failed: {error}")
                 return
             self._set_value("x-offset", pre_process_plan.x_offset)
             self._set_value("y-offset", pre_process_plan.y_offset)
             messages = validate_values(self.values)
             self._show_validation_messages(messages)
             if messages:
-                self._set_output("\n".join(message.text for message in messages))
+                self._append_process_log(
+                    "Validation",
+                    "\n".join(message.text for message in messages),
+                )
                 return
         try:
             pre_process_result = pre_process_input_files(
@@ -1021,10 +1038,9 @@ class Pcb2GCodeApp:
                 pre_process_plan,
             )
         except OSError as error:
-            self._set_command_result(
-                CommandResult(["pre-process"], 1, f"Pre-process failed: {error}")
-            )
+            self._append_process_log("Pre-process", f"Pre-process failed: {error}")
             return
+        self._append_process_log("Pre-process", pre_process_result.summary)
         if pre_process_result.values.get(PRE_ALIGN_DRILL_SOURCE_KEY, "").strip():
             self._set_value(
                 PRE_ALIGN_DRILL_SOURCE_KEY,
@@ -1035,27 +1051,26 @@ class Pcb2GCodeApp:
             pre_process_result.values,
             base_dir=self._base_dir(),
         )
-        validation_result = self._with_pre_process_summary(validation_result, pre_process_result)
+        self._append_command_result("Validate", validation_result)
         if not validation_result.ok:
-            self._set_command_result(validation_result)
             return
         generation_result = generate_nc_files(
             pre_process_result.values,
             base_dir=self._base_dir(),
         )
-        generation_result = self._with_pre_process_summary(generation_result, pre_process_result)
+        self._append_command_result("Generate NC", generation_result)
         if generation_result.ok:
             align_generation_result = self._generate_align_drill_nc(
-                generation_result,
                 pre_process_result,
             )
             if not align_generation_result.ok:
-                self._set_command_result(align_generation_result)
                 return
-            generation_result = align_generation_result
+            if align_generation_result.command:
+                generation_result = align_generation_result
         if generation_result.ok:
-            generation_result = self._post_process_generation_result(generation_result)
-        self._set_command_result(generation_result)
+            post_process_ok = self._post_process_generated_files()
+            if not post_process_ok:
+                return
         if generation_result.ok:
             self.generated_values_snapshot = self._values_snapshot()
             self._reset_gcode_preview_after_generation()
@@ -1064,41 +1079,31 @@ class Pcb2GCodeApp:
 
     def _generate_align_drill_nc(
         self,
-        generation_result: CommandResult,
         pre_process_result: PreProcessResult,
     ) -> CommandResult:
         if not bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false")):
-            return generation_result
+            return CommandResult([], 0, "")
         if not pre_process_result.processed_files:
-            return generation_result
+            return CommandResult([], 0, "")
         align_values = align_drill_generation_values(pre_process_result.values)
         result = generate_nc_files(align_values, base_dir=self._base_dir())
-        output = "\n\n".join(
-            item
-            for item in (
-                generation_result.output,
-                "Alignment drill NC (front side):",
-                result.output,
-            )
-            if item
-        )
-        return CommandResult(result.command, result.return_code, output)
+        self._append_command_result("Alignment drill NC (front side):", result)
+        return result
 
-    def _post_process_generation_result(self, result: CommandResult) -> CommandResult:
-        if not bool_value(self.values.get(POST_REMOVE_T_KEY, "false")):
-            return result
+    def _post_process_generated_files(self) -> bool:
+        if not self._post_process_enabled():
+            return True
         try:
             post_process_result = post_process_generated_files(self.values, self._base_dir())
         except OSError as error:
-            return CommandResult(
-                result.command,
-                1,
-                f"{result.output}\n\nPost-process failed: {error}",
-            )
-        return CommandResult(
-            result.command,
-            result.return_code,
-            f"{result.output}\n\n{post_process_result.summary}",
+            self._append_process_log("Post-process", f"Post-process failed: {error}")
+            return False
+        self._append_process_log("Post-process", post_process_result.summary)
+        return True
+
+    def _post_process_enabled(self) -> bool:
+        return bool_value(self.values.get(POST_REMOVE_T_KEY, "false")) or bool_value(
+            self.values.get(POST_ORIGIN_BEFORE_M3_KEY, "false")
         )
 
     def _with_pre_process_summary(
@@ -1291,11 +1296,27 @@ class Pcb2GCodeApp:
             control.error_text = None
 
     def _set_command_result(self, result: CommandResult):
+        self._set_output(self._format_command_result(result))
+
+    def _append_command_result(self, title: str, result: CommandResult):
+        self._append_command_history(title, self._format_command_result(result))
+
+    def _append_process_log(self, title: str, text: str):
+        self._append_command_history(title, text)
+
+    def _append_command_history(self, title: str, body: str):
+        content = "\n\n".join(item for item in (title, body.strip()) if item)
+        self.command_history_blocks.append(content)
+        self.command_output.value = COMMAND_HISTORY_SEPARATOR.join(self.command_history_blocks)
+        self.page.update()
+
+    def _format_command_result(self, result: CommandResult) -> str:
         command = " ".join(result.command)
         status = "OK" if result.ok else f"Failed with exit code {result.return_code}"
-        self._set_output(f"{status}\n\n{command}\n\n{result.output}")
+        return "\n\n".join(item for item in (status, command, result.output.strip()) if item)
 
     def _set_output(self, text: str):
+        self.command_history_blocks = []
         self.command_output.value = text
         self.page.update()
 

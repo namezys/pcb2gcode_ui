@@ -21,7 +21,12 @@ from pcb2gcode_ui.postprocess import PostProcessResult
 from pcb2gcode_ui.preprocess import AlignDrillsPlan, PreProcessResult
 from pcb2gcode_ui.preview import PreviewResult, PreviewSide
 from pcb2gcode_ui.runner import CommandResult
-from pcb2gcode_ui.ui import MUTED_TEXT_COLOR, STALE_TEXT_COLOR, Pcb2GCodeApp
+from pcb2gcode_ui.ui import (
+    COMMAND_HISTORY_SEPARATOR,
+    MUTED_TEXT_COLOR,
+    STALE_TEXT_COLOR,
+    Pcb2GCodeApp,
+)
 
 
 @dataclass
@@ -153,6 +158,22 @@ def test_app_build_adds_process_tabs_and_options():
     assert "Post-process" in app.group_controls
     assert "post-remove-t" in app.controls
     assert "post-origin-before-m3" in app.controls
+
+
+def test_app_build_right_aligns_generate_button():
+    page = FakePage()
+
+    Pcb2GCodeApp(page).build()
+
+    toolbar = page.controls[0].controls[0]
+    assert isinstance(toolbar, ft.Row)
+    assert isinstance(toolbar.controls[0], ft.Row)
+    assert toolbar.controls[0].expand is True
+    assert toolbar.wrap is False
+    assert _control_label(toolbar.controls[-1]) == "Generate NC"
+    assert "Generate NC" not in {
+        _control_label(control) for control in toolbar.controls[0].controls
+    }
 
 
 def test_app_restores_last_working_directory(tmp_path: Path, monkeypatch):
@@ -617,6 +638,35 @@ def test_successful_generation_runs_enabled_post_process(monkeypatch):
     assert app.generated_values_snapshot == app.values
 
 
+def test_successful_generation_runs_origin_before_m3_post_process(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["post-origin-before-m3"] = "true"
+    calls: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 0, "generated"),
+    )
+
+    def fake_post_process(values, base_dir):
+        calls.append(dict(values))
+        return PostProcessResult(2, 1, 0, 2)
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.post_process_generated_files", fake_post_process)
+
+    app._generate(None)
+
+    assert calls
+    assert "Post-process: changed 1 file(s), inserted origin move before M3 2 time(s)." in (
+        app.command_output.value
+    )
+
+
 def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: Path):
     app = _app()
     app.values["zsafe"] = "5"
@@ -711,6 +761,18 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
         app.command_output.value
     )
     assert "Alignment drill NC (front side):" in app.command_output.value
+    assert app.command_output.value.index("Pre-process outline generation") < (
+        app.command_output.value.index("Pre-process\n\nPre-process: wrote")
+    )
+    assert app.command_output.value.index("Pre-process\n\nPre-process: wrote") < (
+        app.command_output.value.index("Validate")
+    )
+    assert app.command_output.value.index("Validate") < (
+        app.command_output.value.index("Generate NC")
+    )
+    assert app.command_output.value.index("Generate NC") < (
+        app.command_output.value.index("Alignment drill NC (front side)")
+    )
     assert app.generated_values_snapshot == app.values
 
 
@@ -809,7 +871,46 @@ def test_validation_does_not_run_pre_process(monkeypatch, tmp_path: Path):
 
     app._validate(None)
 
-    assert app.command_output.value.startswith("OK")
+    assert app.command_output.value.startswith("Validate")
+    assert "OK\n\nvalidate\n\nvalid" in app.command_output.value
+
+
+def test_validation_appends_command_history(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    outputs = iter(("first valid", "second valid"))
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, next(outputs)),
+    )
+
+    app._validate(None)
+    app._validate(None)
+
+    assert app.command_output.value == COMMAND_HISTORY_SEPARATOR.join(
+        [
+            "Validate\n\nOK\n\nvalidate\n\nfirst valid",
+            "Validate\n\nOK\n\nvalidate\n\nsecond valid",
+        ]
+    )
+
+
+def test_overwrite_output_clears_command_history(monkeypatch):
+    app = _app()
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    outputs = iter(("first valid", "second valid"))
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, next(outputs)),
+    )
+
+    app._validate(None)
+    app._set_output("Saved project")
+    app._validate(None)
+
+    assert app.command_output.value == "Validate\n\nOK\n\nvalidate\n\nsecond valid"
 
 
 def test_post_process_failure_does_not_mark_generated_current(monkeypatch):
@@ -1420,7 +1521,13 @@ def _control_label(control: ft.Control) -> str:
     if isinstance(label, str):
         return label
     label_value = getattr(label, "value", None)
-    return label_value if isinstance(label_value, str) else ""
+    if isinstance(label_value, str):
+        return label_value
+    content = getattr(control, "content", None)
+    if isinstance(content, str):
+        return content
+    content_value = getattr(content, "value", None)
+    return content_value if isinstance(content_value, str) else ""
 
 
 def _is_default_checkbox(control: ft.Control) -> bool:
