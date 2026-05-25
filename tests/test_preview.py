@@ -36,9 +36,9 @@ from pcb2gcode_ui.preview import (
 )
 
 
-def test_default_preview_resolution_is_high_quality():
-    assert DEFAULT_PREVIEW_DPMM == 100
-    assert PreviewOptions().dpmm == 100
+def test_default_preview_resolution_is_balanced_quality():
+    assert DEFAULT_PREVIEW_DPMM == 50
+    assert PreviewOptions().dpmm == 50
 
 
 def test_render_preview_uses_pygerber_api_for_example_board():
@@ -701,7 +701,13 @@ def test_compose_preview_colors_gcode_by_tool_path():
         None,
         Bounds(0, 0, 10, 10),
         settings,
-        PreviewOptions(show_front=False, show_drill=False, show_cutoff=False, show_gcode=True),
+        PreviewOptions(
+            show_front=False,
+            show_drill=False,
+            show_cutoff=False,
+            show_gcode=True,
+            dpmm=100,
+        ),
         trace,
     )
 

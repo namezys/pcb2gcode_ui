@@ -30,7 +30,7 @@ from pcb2gcode_ui.gcode_preview import (
 from pcb2gcode_ui.options import bool_value
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_PREVIEW_DPMM = 100
+DEFAULT_PREVIEW_DPMM = 50
 DEFAULT_LAYER_ALPHA = 50
 MAX_ALPHA = 255
 MIN_CANVAS_SIZE = 1
