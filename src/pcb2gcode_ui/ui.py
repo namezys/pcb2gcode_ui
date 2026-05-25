@@ -1000,6 +1000,7 @@ class Pcb2GCodeApp:
         self._append_command_result("Validate", result)
 
     def _generate(self, _event):
+        self._reset_offsets_for_align_drills()
         messages = validate_values(self.values)
         self._show_validation_messages(messages)
         if messages:
@@ -1159,6 +1160,16 @@ class Pcb2GCodeApp:
             bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false"))
             and bool(self.values.get("outline", "").strip())
         )
+
+    def _reset_offsets_for_align_drills(self):
+        try:
+            enabled = bool_value(self.values.get(PRE_ALIGN_DRILLS_KEY, "false"))
+        except ValueError:
+            return
+        if not enabled:
+            return
+        self._set_value("x-offset", "0", mark_generated_stale=False)
+        self._set_value("y-offset", "0", mark_generated_stale=False)
 
     def _first_pass_pre_process_values(self) -> dict[str, str]:
         values = dict(self.values)

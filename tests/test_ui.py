@@ -748,6 +748,8 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
     app.values["pre-align-drills"] = "true"
     app.values["pre-align-drill-diameter"] = "0.5mm"
     app.values["pre-align-drill-depth"] = "1.2mm"
+    app.values["x-offset"] = "11mm"
+    app.values["y-offset"] = "12mm"
     calls: list[dict[str, str]] = []
     generate_calls: list[dict[str, str]] = []
 
@@ -785,18 +787,24 @@ def test_successful_generation_runs_enabled_pre_process(monkeypatch, tmp_path: P
     monkeypatch.setattr("pcb2gcode_ui.ui.pre_process_input_files", fake_pre_process)
     monkeypatch.setattr("pcb2gcode_ui.ui.validate_with_binary", fake_validate)
     monkeypatch.setattr("pcb2gcode_ui.ui.generate_nc_files", fake_generate)
-    monkeypatch.setattr(
-        Pcb2GCodeApp,
-        "_build_align_drills_plan",
-        lambda _app, _values: AlignDrillsPlan("-20mm", "-30mm", ((20, 19.5), (20, 40.5))),
-    )
+
+    def fake_align_plan(_app, values):
+        assert values["x-offset"] == "0"
+        assert values["y-offset"] == "0"
+        return AlignDrillsPlan("-20mm", "-30mm", ((20, 19.5), (20, 40.5)))
+
+    monkeypatch.setattr(Pcb2GCodeApp, "_build_align_drills_plan", fake_align_plan)
 
     app._generate(None)
 
     assert generate_calls[0]["drill"] == str(tmp_path / "drill.drl")
     assert generate_calls[0]["output-dir"] == str(tmp_path / "nc" / "pcb2gcode-ui-preprocess")
+    assert generate_calls[0]["x-offset"] == "0"
+    assert generate_calls[0]["y-offset"] == "0"
     assert generate_calls[1]["drill"] == str(tmp_path / "drill.drl")
     assert generate_calls[1]["output-dir"] == str(tmp_path / "nc")
+    assert generate_calls[1]["x-offset"] == "-20mm"
+    assert generate_calls[1]["y-offset"] == "-30mm"
     assert generate_calls[2]["front"] == ""
     assert generate_calls[2]["back"] == ""
     assert generate_calls[2]["outline"] == ""
