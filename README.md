@@ -39,6 +39,8 @@ or:
 
 ## Workflow
 
+See [docs/manual.md](docs/manual.md) for the full user manual with screenshots.
+
 1. Open an existing `millproject` or select Gerber/Excellon files directly.
 2. Click Preview to open a closable preview window, then choose front/back view and toggle
    front, back, drill, cutoff, Aux, G-code movement, or layer transparency.
