@@ -7,6 +7,7 @@ dependencies = [
     "gcodeparser>=0.3,<0.4",
     "pillow>=8",
     "pygerber>=2.4.3,<3",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]

@@ -205,6 +205,94 @@ def test_set_working_directory_preserves_default_millproject(tmp_path: Path, mon
     }
 
 
+def test_set_working_directory_preserves_selected_profile(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    last_directory = tmp_path / "last"
+    last_directory.mkdir()
+    state_file.write_text(
+        json.dumps({"selected_profile": "MaxMake"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    app = _app()
+
+    app._set_working_directory(last_directory)
+
+    assert json.loads(state_file.read_text(encoding="utf-8")) == {
+        "last_directory": str(last_directory),
+        "selected_profile": "MaxMake",
+    }
+
+
+def test_app_build_applies_saved_profile(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps({"selected_profile": "MaxMake"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    app = Pcb2GCodeApp(FakePage())
+
+    app.build()
+
+    assert app.selected_profile_name == "MaxMake"
+    assert app.values["post-remove-t"] == "true"
+    assert app.values["post-origin-before-m3"] == "true"
+    assert app.controls["post-remove-t"].disabled is True
+    assert app.controls["post-origin-before-m3"].disabled is True
+    assert "tool probe is at least 15 mm" in app.profile_description.value
+
+
+def test_select_profile_applies_locks_and_persists(tmp_path: Path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    monkeypatch.setenv("PCB2GCODE_UI_STATE_FILE", str(state_file))
+    app = Pcb2GCodeApp(FakePage())
+    app.build()
+    app.values["post-remove-t"] = "false"
+    app.values["post-origin-before-m3"] = "false"
+    app.generated_values_snapshot = dict(app.values)
+    app.profile_dropdown.value = "MaxMake"
+
+    app._select_profile(FakeEvent(app.profile_dropdown))
+
+    assert app.values["post-remove-t"] == "true"
+    assert app.values["post-origin-before-m3"] == "true"
+    assert app.controls["post-remove-t"].disabled is True
+    assert app.controls["post-origin-before-m3"].disabled is True
+    assert json.loads(state_file.read_text(encoding="utf-8"))["selected_profile"] == "MaxMake"
+    assert app.generation_status.value == "NC: generated output is stale; settings changed."
+    assert app.generation_status.color == STALE_TEXT_COLOR
+
+
+def test_custom_profile_unlocks_controls_and_keeps_values():
+    app = Pcb2GCodeApp(FakePage())
+    app.build()
+    app.profile_dropdown.value = "MaxMake"
+    app._select_profile(FakeEvent(app.profile_dropdown))
+    app.profile_dropdown.value = ""
+
+    app._select_profile(FakeEvent(app.profile_dropdown))
+
+    assert app.selected_profile_name == ""
+    assert app.values["post-remove-t"] == "true"
+    assert app.values["post-origin-before-m3"] == "true"
+    assert app.controls["post-remove-t"].disabled is False
+    assert app.controls["post-origin-before-m3"].disabled is False
+    assert app.profile_description.value == "Profile: custom editable settings."
+
+
+def test_fixed_profile_option_cannot_be_changed_by_event():
+    app = Pcb2GCodeApp(FakePage())
+    app.build()
+    app.profile_dropdown.value = "MaxMake"
+    app._select_profile(FakeEvent(app.profile_dropdown))
+
+    app._set_value("post-remove-t", "false")
+
+    assert app.values["post-remove-t"] == "true"
+    assert app.controls["post-remove-t"].value is True
+
+
 def test_app_build_loads_default_millproject(tmp_path: Path, monkeypatch):
     state_file = tmp_path / "state.json"
     default_path = tmp_path / "millproject"
@@ -241,6 +329,42 @@ def test_open_file_awaits_picker_and_loads_millproject(tmp_path: Path):
     assert app.values["metric"] == "true"
     assert app.values["zsafe"] == "5"
     assert app.values["zchange"] == "10"
+
+
+def test_open_file_reapplies_selected_profile(tmp_path: Path):
+    millproject_path = tmp_path / "millproject"
+    millproject_path.write_text(
+        "zsafe=5\nzchange=10\npost-remove-t=false\npost-origin-before-m3=false\n",
+        encoding="utf-8",
+    )
+    app = Pcb2GCodeApp(FakePage())
+    app.build()
+    app.profile_dropdown.value = "MaxMake"
+    app._select_profile(FakeEvent(app.profile_dropdown))
+    app.file_picker = FakeFilePicker([FakeFile(str(millproject_path))])
+
+    asyncio.run(app._open_file(None))
+
+    assert app.current_millproject == millproject_path
+    assert app.values["post-remove-t"] == "true"
+    assert app.values["post-origin-before-m3"] == "true"
+    assert app.controls["post-remove-t"].value is True
+    assert app.controls["post-origin-before-m3"].value is True
+
+
+def test_save_writes_profile_fixed_values(tmp_path: Path):
+    millproject_path = tmp_path / "millproject"
+    app = Pcb2GCodeApp(FakePage())
+    app.build()
+    app.current_millproject = millproject_path
+    app.profile_dropdown.value = "MaxMake"
+    app._select_profile(FakeEvent(app.profile_dropdown))
+
+    app._write_millproject(millproject_path)
+
+    values = parse_millproject(millproject_path)
+    assert values["post-remove-t"] == "true"
+    assert values["post-origin-before-m3"] == "true"
 
 
 def test_open_file_rejects_invalid_millproject(tmp_path: Path):

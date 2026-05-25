@@ -10,12 +10,14 @@ STATE_FILE_ENV_VAR = "PCB2GCODE_UI_STATE_FILE"
 STATE_FILE_NAME = "state.json"
 LAST_DIRECTORY_KEY = "last_directory"
 DEFAULT_MILLPROJECT_KEY = "default_millproject"
+SELECTED_PROFILE_KEY = "selected_profile"
 
 
 @dataclass(frozen=True)
 class AppSettings:
     last_directory: Path
     default_millproject: Path = None
+    selected_profile: str = ""
 
 
 def load_last_directory() -> Path:
@@ -28,6 +30,7 @@ def save_last_directory(path: Path) -> None:
         AppSettings(
             last_directory=path,
             default_millproject=settings.default_millproject,
+            selected_profile=settings.selected_profile,
         )
     )
 
@@ -49,6 +52,7 @@ def load_app_settings() -> AppSettings:
     return AppSettings(
         last_directory=_load_directory(data),
         default_millproject=_load_default_millproject(data),
+        selected_profile=_load_selected_profile(data),
     )
 
 
@@ -57,6 +61,8 @@ def save_app_settings(settings: AppSettings) -> None:
     data = {LAST_DIRECTORY_KEY: str(settings.last_directory.expanduser())}
     if settings.default_millproject:
         data[DEFAULT_MILLPROJECT_KEY] = str(settings.default_millproject.expanduser())
+    if settings.selected_profile:
+        data[SELECTED_PROFILE_KEY] = settings.selected_profile
 
     try:
         state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +96,13 @@ def _load_default_millproject(data: dict) -> Path:
         LOGGER.debug("Ignoring missing default millproject %s", path)
         return None
     return path
+
+
+def _load_selected_profile(data: dict) -> str:
+    profile_name = data.get(SELECTED_PROFILE_KEY)
+    if not isinstance(profile_name, str):
+        return ""
+    return profile_name
 
 
 def _state_file() -> Path:

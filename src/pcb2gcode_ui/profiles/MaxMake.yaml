@@ -1,0 +1,4 @@
+description: "We must go to origin before any command after tool change because CNC moves tool after change to z-probe position, and going to work Z position is unsafe because the tool probe is at least 15 mm."
+options:
+  post-remove-t: true
+  post-origin-before-m3: true

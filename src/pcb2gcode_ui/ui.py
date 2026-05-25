@@ -56,6 +56,7 @@ from pcb2gcode_ui.preview import (
     PreviewSide,
     transformed_gcode_cutoff_bounds_summary,
 )
+from pcb2gcode_ui.profile_loader import Profile, load_profiles
 from pcb2gcode_ui.runner import (
     CommandResult,
     discover_binary,
@@ -66,6 +67,8 @@ from pcb2gcode_ui.runner import (
 from pcb2gcode_ui.validation import ValidationMessage, validate_values
 
 FIELD_WIDTH = 520
+PROFILE_FIELD_WIDTH = 190
+PROFILE_DESCRIPTION_WIDTH = 360
 BUTTON_WIDTH = 140
 WINDOW_WIDTH = 1000
 WINDOW_HEIGHT = 720
@@ -89,6 +92,8 @@ LEGEND_SWATCH_SIZE = 18
 INSTRUMENT_OVERLAY_WIDTH = 330
 INSTRUMENT_OVERLAY_MARGIN = 10
 CUTOFF_STATUS_EMPTY = "Cutoff bounds: no cutoff loaded."
+CUSTOM_PROFILE_NAME = ""
+CUSTOM_PROFILE_LABEL = "Custom"
 PRE_PROCESS_OUTPUT_DIR_NAME = "pcb2gcode-ui-preprocess"
 BODY_TEXT_SIZE = 12
 SMALL_TEXT_SIZE = 11
@@ -118,6 +123,13 @@ class Pcb2GCodeApp:
         self.app_settings = load_app_settings()
         self.default_millproject = self.app_settings.default_millproject
         self.working_directory = self.app_settings.last_directory
+        self.profiles = load_profiles()
+        self.profiles_by_name = {profile.name: profile for profile in self.profiles}
+        self.selected_profile_name = (
+            self.app_settings.selected_profile
+            if self.app_settings.selected_profile in self.profiles_by_name
+            else CUSTOM_PROFILE_NAME
+        )
         self.generated_values_snapshot: dict[str, str] = None
         self.file_picker = ft.FilePicker()
         self.other_layer_picker = ft.FilePicker()
@@ -234,6 +246,27 @@ class Pcb2GCodeApp:
         self.help_dialog: ft.AlertDialog = None
         self.status_text = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
         self.generation_status = ft.Text(color=MUTED_TEXT_COLOR, size=BODY_TEXT_SIZE)
+        self.profile_description = ft.Text(
+            self._selected_profile_description(),
+            color=MUTED_TEXT_COLOR,
+            size=BODY_TEXT_SIZE,
+            width=PROFILE_DESCRIPTION_WIDTH,
+        )
+        self.profile_dropdown = ft.Dropdown(
+            label="Profile",
+            value=self.selected_profile_name,
+            options=[
+                ft.DropdownOption(key=CUSTOM_PROFILE_NAME, text=CUSTOM_PROFILE_LABEL),
+                *[
+                    ft.DropdownOption(key=profile.name, text=profile.name)
+                    for profile in self.profiles
+                ],
+            ],
+            tooltip="Fixed machine profile.",
+            width=PROFILE_FIELD_WIDTH,
+            on_select=self._select_profile,
+            **_dropdown_style(),
+        )
         self._update_generation_status()
         self.group_container = ft.Column(spacing=8)
         self.group_controls: dict[str, ft.Control] = {}
@@ -283,6 +316,7 @@ class Pcb2GCodeApp:
                 spacing=12,
             )
         )
+        self._apply_selected_profile(mark_generated_stale=False)
         self._load_default_millproject_on_startup()
 
     def _build_toolbar(self) -> ft.Control:
@@ -324,6 +358,8 @@ class Pcb2GCodeApp:
                     on_click=self._open_general_help,
                     style=_button_style(),
                 ),
+                self.profile_dropdown,
+                self.profile_description,
                 ft.FilledButton("Generate NC", icon=ft.Icons.PLAY_ARROW, on_click=self._generate),
             ],
             wrap=True,
@@ -540,6 +576,11 @@ class Pcb2GCodeApp:
         self.group_container.controls = [self.group_controls[group]]
         self.page.update()
 
+    def _select_profile(self, event):
+        self.selected_profile_name = event.control.value or CUSTOM_PROFILE_NAME
+        self._apply_selected_profile()
+        self._save_app_settings()
+
     def _update_preview_options(self, event):
         self._refresh_preview(event)
 
@@ -718,7 +759,11 @@ class Pcb2GCodeApp:
         value: str,
         update_control: bool = True,
         mark_generated_stale: bool = True,
+        force_profile_value: bool = False,
     ):
+        fixed_value = self._selected_profile_options().get(key)
+        if fixed_value is not None and not force_profile_value:
+            value = fixed_value
         self.values[key] = value
         control = self.controls.get(key)
         if update_control and control:
@@ -730,6 +775,45 @@ class Pcb2GCodeApp:
         if mark_generated_stale:
             self._update_generation_status()
         self.page.update()
+
+    def _selected_profile(self) -> Profile:
+        return self.profiles_by_name.get(self.selected_profile_name)
+
+    def _selected_profile_options(self) -> dict[str, str]:
+        profile = self._selected_profile()
+        if not profile:
+            return {}
+        return dict(profile.options)
+
+    def _selected_profile_description(self) -> str:
+        profile = self._selected_profile()
+        if not profile:
+            return "Profile: custom editable settings."
+        return profile.description
+
+    def _apply_selected_profile(self, mark_generated_stale: bool = True):
+        self._apply_profile_values(mark_generated_stale=mark_generated_stale)
+        self._apply_profile_control_locks()
+        self.profile_dropdown.value = self.selected_profile_name
+        self.profile_description.value = self._selected_profile_description()
+        self.page.update()
+
+    def _apply_profile_values(self, mark_generated_stale: bool = True):
+        for key, value in self._selected_profile_options().items():
+            self._set_value(
+                key,
+                value,
+                mark_generated_stale=mark_generated_stale and self.values.get(key) != value,
+                force_profile_value=True,
+            )
+
+    def _apply_profile_control_locks(self):
+        fixed_keys = set(self._selected_profile_options())
+        profile_keys = {key for profile in self.profiles for key in profile.options}
+        for key in profile_keys:
+            control = self.controls.get(key)
+            if control:
+                control.disabled = key in fixed_keys
 
     def _set_default_output_dir(self, mark_generated_stale: bool = True):
         if not self.values.get("output-dir", "").strip():
@@ -854,8 +938,10 @@ class Pcb2GCodeApp:
         self.current_millproject = path
         self._set_working_directory(path.parent)
         self.values = values
+        self._apply_profile_values(mark_generated_stale=False)
         for key, value in self.values.items():
             self._set_value(key, value, mark_generated_stale=False)
+        self._apply_profile_control_locks()
         self._set_default_output_dir(mark_generated_stale=False)
         self._clear_generated_snapshot()
         self._set_output(f"{success_prefix} {path}")
@@ -1272,6 +1358,7 @@ class Pcb2GCodeApp:
             AppSettings(
                 last_directory=self.working_directory,
                 default_millproject=self.default_millproject,
+                selected_profile=self.selected_profile_name,
             )
         )
 
