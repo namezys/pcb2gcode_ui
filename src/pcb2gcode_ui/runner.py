@@ -23,6 +23,7 @@ class CommandResult:
     command: list[str]
     return_code: int
     output: str
+    cwd: Path = None
 
     @property
     def ok(self) -> bool:
@@ -120,6 +121,7 @@ def run_command(command: list[str], cwd: Path) -> CommandResult:
         command=command,
         return_code=process.returncode,
         output=_combined_output(process.stdout, process.stderr),
+        cwd=cwd,
     )
 
 

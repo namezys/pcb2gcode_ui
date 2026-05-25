@@ -1349,7 +1349,10 @@ class Pcb2GCodeApp:
     def _format_command_result(self, result: CommandResult) -> str:
         command = " ".join(result.command)
         status = "OK" if result.ok else f"Failed with exit code {result.return_code}"
-        return "\n\n".join(item for item in (status, command, result.output.strip()) if item)
+        working_directory = f"Working directory: {result.cwd}" if result.cwd else ""
+        return "\n\n".join(
+            item for item in (status, working_directory, command, result.output.strip()) if item
+        )
 
     def _set_output(self, text: str):
         self.command_history_blocks = []

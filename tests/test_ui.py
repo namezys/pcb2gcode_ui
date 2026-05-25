@@ -940,6 +940,19 @@ def test_validation_does_not_run_pre_process(monkeypatch, tmp_path: Path):
     assert "OK\n\nvalidate\n\nvalid" in app.command_output.value
 
 
+def test_command_result_includes_working_directory_in_history(tmp_path: Path):
+    app = _app()
+
+    app._append_command_result(
+        "Validate",
+        CommandResult(["validate"], 0, "valid", cwd=tmp_path),
+    )
+
+    assert app.command_output.value == (
+        f"Validate\n\nOK\n\nWorking directory: {tmp_path}\n\nvalidate\n\nvalid"
+    )
+
+
 def test_validation_appends_command_history(monkeypatch):
     app = _app()
     app.values["zsafe"] = "5"

@@ -129,6 +129,7 @@ def test_run_command_logs_stdout_and_stderr(caplog, tmp_path: Path):
     )
 
     assert result.return_code == 3
+    assert result.cwd == tmp_path
     assert result.output == "stdout text\nstderr text\n"
     assert "Command stdout:\nstdout text" in caplog.text
     assert "Command stderr:\nstderr text" in caplog.text
