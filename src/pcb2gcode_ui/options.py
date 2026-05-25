@@ -56,7 +56,7 @@ OPTION_SPECS: tuple[OptionSpec, ...] = (
     OptionSpec("outline", "Files", "Outline Gerber", "file", "PCB outline polygon RS274-X .gbr."),
     OptionSpec("zsafe", "CNC", "Safe Z", "number", "Safety height during rapid moves."),
     OptionSpec(
-        "spinup-time", "CNC", "Spin-up time", "number", "Time for spindle to reach speed.", "1ms"
+        "spinup-time", "CNC", "Spin-up time", "number", "Time for spindle to reach speed.", "1s"
     ),
     OptionSpec("spindown-time", "CNC", "Spin-down time", "number", "Time for spindle to stop."),
     OptionSpec("zchange", "CNC", "Tool-change Z", "number", "Tool changing height."),

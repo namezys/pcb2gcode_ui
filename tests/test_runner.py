@@ -41,6 +41,21 @@ def test_build_arguments_resolves_relative_paths_against_base_dir(tmp_path: Path
     ]
 
 
+def test_build_arguments_converts_spindle_dwell_to_pcb2gcode_seconds():
+    args = build_arguments(
+        {
+            "spinup-time": "2s",
+            "spindown-time": "1500ms",
+        }
+    )
+
+    assert args == [
+        "--noconfigfile",
+        "--spinup-time=2ms",
+        "--spindown-time=1.5ms",
+    ]
+
+
 def test_build_arguments_skips_ui_only_process_options():
     args = build_arguments(
         {

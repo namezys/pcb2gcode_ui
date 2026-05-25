@@ -16,6 +16,8 @@ from pcb2gcode_ui.options import (
 
 LOGGER = logging.getLogger(__name__)
 PCB2GCODE_BINARY = "pcb2gcode"
+TIME_OPTIONS = {"spinup-time", "spindown-time"}
+MILLISECONDS_PER_SECOND = 1000
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,8 @@ def build_arguments(
             continue
         if spec.kind == "bool":
             value = "true" if bool_value(value) else "false"
+        elif spec.key in TIME_OPTIONS:
+            value = _pcb2gcode_time_value(value)
         elif spec.key in FILE_OPTIONS:
             value = str(_resolve_path(value, base_dir))
         elif spec.key == "output-dir":
@@ -137,3 +141,27 @@ def _resolve_path(value: str, base_dir: Path = None) -> Path:
     if path.is_absolute():
         return path
     return (base_dir or Path.cwd()) / path
+
+
+def _pcb2gcode_time_value(value: str) -> str:
+    seconds = _time_seconds(value)
+    if seconds is None:
+        return value
+    return f"{seconds:.15g}ms"
+
+
+def _time_seconds(value: str) -> float | None:
+    normalized = value.strip().lower()
+    if normalized.endswith("ms"):
+        multiplier = 1 / MILLISECONDS_PER_SECOND
+        number = normalized[:-2]
+    elif normalized.endswith("s"):
+        multiplier = 1
+        number = normalized[:-1]
+    else:
+        multiplier = 1
+        number = normalized
+    try:
+        return float(number) * multiplier
+    except ValueError:
+        return None
