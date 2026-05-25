@@ -14,7 +14,9 @@ from pcb2gcode_ui.gcode_preview import (
     gcode_cutoff_bounds,
     gcode_cutoff_bounds_summary,
     gcode_tool_parameters_label,
+    gcode_tool_sections,
     load_gcode_trace,
+    write_gcode_tool_report,
 )
 
 
@@ -383,6 +385,56 @@ def test_load_gcode_trace_reads_align_drill_output(tmp_path: Path):
 
     assert {segment.source_kind for segment in trace.segments} == {"align-drill"}
     assert trace.sources == [GcodeSource("align-drill", "align-drill.nc")]
+
+
+def test_gcode_tool_sections_group_by_nc_file_and_restart_path_index():
+    front_trace = GcodeInterpreter().parse("G21\nT1 M6\nG1 X1 Z-0.1\n", "front", "front.ngc")
+    back_trace = GcodeInterpreter().parse("G21\nT2 M6\nG1 X2 Z-0.1\n", "back", "back.ngc")
+    trace = GcodeTrace(
+        [*front_trace.segments, *back_trace.segments],
+        [],
+        [*front_trace.instruments, *back_trace.instruments],
+    )
+
+    sections = gcode_tool_sections(trace)
+
+    assert [section.source_label for section in sections] == ["front.ngc", "back.ngc"]
+    assert [section.rows[0].path_index for section in sections] == [1, 1]
+    assert [section.rows[0].tool_id for section in sections] == ["1", "2"]
+
+
+def test_write_gcode_tool_report_groups_tools_by_nc_file(tmp_path: Path):
+    output_dir = tmp_path / "nc"
+    output_dir.mkdir()
+    (output_dir / "front.ngc").write_text("G21\nT1 M6\nG1 X1 Z-0.1\n", encoding="utf-8")
+    (output_dir / "back.ngc").write_text("G21\nT2 M6\nG1 X2 Z-0.1\n", encoding="utf-8")
+
+    result = write_gcode_tool_report(
+        {
+            "front": "front.gbr",
+            "back": "back.gbr",
+            "output-dir": str(output_dir),
+        },
+        tmp_path,
+        {"front", "back"},
+    )
+
+    assert result.path == output_dir / "tools.md"
+    assert result.path.read_text(encoding="utf-8") == (
+        "# NC Tools\n"
+        "\n"
+        "## front.ngc\n"
+        "\n"
+        "| Path | Tool | Bit | Cut | Pass |\n"
+        "| ---: | --- | --- | ---: | ---: |\n"
+        "| 1 | 1 | - | 1 | 0 |\n"
+        "\n"
+        "## back.ngc\n"
+        "\n"
+        "| Path | Tool | Bit | Cut | Pass |\n"
+        "| ---: | --- | --- | ---: | ---: |\n"
+        "| 1 | 2 | - | 1 | 0 |\n"
+    )
 
 
 def test_trace_filter_keeps_requested_source_only():

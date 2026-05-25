@@ -638,6 +638,71 @@ def test_successful_generation_runs_enabled_post_process(monkeypatch):
     assert app.generated_values_snapshot == app.values
 
 
+def test_successful_generation_writes_tool_report(monkeypatch, tmp_path: Path):
+    output_dir = tmp_path / "nc"
+    front_path = tmp_path / "front.gbr"
+    front_path.write_text("", encoding="utf-8")
+    app = _app()
+    app.values["front"] = str(front_path)
+    app.values["output-dir"] = str(output_dir)
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["zwork"] = "-0.01"
+    app.values["mill-feed"] = "100"
+    app.values["mill-speed"] = "1000"
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+
+    def fake_generate(values, base_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "front.ngc").write_text("G21\nT3 M6\nG1 X1 Z-0.1\n", encoding="utf-8")
+        return CommandResult(["generate"], 0, "generated")
+
+    monkeypatch.setattr("pcb2gcode_ui.ui.generate_nc_files", fake_generate)
+
+    app._generate(None)
+
+    report_path = output_dir / "tools.md"
+    assert report_path.read_text(encoding="utf-8") == (
+        "# NC Tools\n"
+        "\n"
+        "## front.ngc\n"
+        "\n"
+        "| Path | Tool | Bit | Cut | Pass |\n"
+        "| ---: | --- | --- | ---: | ---: |\n"
+        "| 1 | 3 | - | 1 | 0 |\n"
+    )
+    assert "Tool report: wrote tools.md." in app.command_output.value
+
+
+def test_failed_generation_does_not_write_tool_report(monkeypatch, tmp_path: Path):
+    output_dir = tmp_path / "nc"
+    front_path = tmp_path / "front.gbr"
+    front_path.write_text("", encoding="utf-8")
+    app = _app()
+    app.values["front"] = str(front_path)
+    app.values["output-dir"] = str(output_dir)
+    app.values["zsafe"] = "5"
+    app.values["zchange"] = "10"
+    app.values["zwork"] = "-0.01"
+    app.values["mill-feed"] = "100"
+    app.values["mill-speed"] = "1000"
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.validate_with_binary",
+        lambda values, base_dir: CommandResult(["validate"], 0, "valid"),
+    )
+    monkeypatch.setattr(
+        "pcb2gcode_ui.ui.generate_nc_files",
+        lambda values, base_dir: CommandResult(["generate"], 1, "failed"),
+    )
+
+    app._generate(None)
+
+    assert not (output_dir / "tools.md").exists()
+
+
 def test_successful_generation_runs_origin_before_m3_post_process(monkeypatch):
     app = _app()
     app.values["zsafe"] = "5"
@@ -1237,15 +1302,16 @@ def test_load_gcode_outputs_reads_configured_nc_files(tmp_path: Path):
     assert app.gcode_instrument_overlay.visible is True
     rows = app.gcode_instrument_overlay.content.controls
     assert rows[0].value == "NC tools"
-    assert rows[1].controls[0].value == "Path"
-    assert rows[1].controls[2].value == "Bit"
-    assert rows[2].controls[0].value == "1"
-    assert rows[2].controls[1].value == "1"
-    assert rows[2].controls[2].value == "mill 0.5mm"
-    assert rows[2].controls[3].value == "3"
-    assert rows[2].controls[4].value == "1"
-    assert rows[2].controls[0].color == gcode_instrument_color(0)
-    assert len(rows) == 3
+    assert rows[1].value == "front.ngc"
+    assert rows[2].controls[0].value == "Path"
+    assert rows[2].controls[2].value == "Bit"
+    assert rows[3].controls[0].value == "1"
+    assert rows[3].controls[1].value == "1"
+    assert rows[3].controls[2].value == "mill 0.5mm"
+    assert rows[3].controls[3].value == "3"
+    assert rows[3].controls[4].value == "1"
+    assert rows[3].controls[0].color == gcode_instrument_color(0)
+    assert len(rows) == 4
 
 
 def test_gcode_status_shows_cutoff_bounds_from_outline_cut_paths():
@@ -1376,10 +1442,18 @@ def test_cutoff_status_reports_no_cutoff_without_outline_cut_paths():
     assert "Cutoff bounds:" not in app.gcode_status.value
 
 
-def test_gcode_instrument_overlay_omits_nc_file_names():
+def test_gcode_instrument_overlay_sections_by_nc_file():
     app = _app()
-    front_trace = GcodeInterpreter().parse("G21\nT1 M6\nG1 X1 Z-0.1\n", "front")
-    back_trace = GcodeInterpreter().parse("G21\nT2 M6\nG1 X2 Z-0.1\n", "back")
+    front_trace = GcodeInterpreter().parse(
+        "G21\nT1 M6\nG1 X1 Z-0.1\n",
+        "front",
+        "front.ngc",
+    )
+    back_trace = GcodeInterpreter().parse(
+        "G21\nT2 M6\nG1 X2 Z-0.1\n",
+        "back",
+        "back.ngc",
+    )
     trace = GcodeTrace(
         [*front_trace.segments, *back_trace.segments],
         [],
@@ -1389,8 +1463,9 @@ def test_gcode_instrument_overlay_omits_nc_file_names():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert [row.controls[1].value for row in rows[2:]] == ["1", "2"]
-    assert all(not hasattr(row, "content") for row in rows[2:])
+    assert [rows[1].value, rows[4].value] == ["front.ngc", "back.ngc"]
+    assert [rows[3].controls[0].value, rows[6].controls[0].value] == ["1", "1"]
+    assert [rows[3].controls[1].value, rows[6].controls[1].value] == ["1", "2"]
 
 
 def test_gcode_instrument_overlay_keeps_initial_tool_path():
@@ -1403,9 +1478,9 @@ def test_gcode_instrument_overlay_keeps_initial_tool_path():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert [row.controls[0].value for row in rows[2:]] == ["1"]
-    assert [row.controls[1].value for row in rows[2:]] == ["1"]
-    assert rows[2].controls[4].value == "0"
+    assert [row.controls[0].value for row in rows[3:4]] == ["1"]
+    assert [row.controls[1].value for row in rows[3:4]] == ["1"]
+    assert rows[3].controls[4].value == "0"
 
 
 def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
@@ -1418,7 +1493,7 @@ def test_gcode_instrument_overlay_skips_pass_only_changed_tool():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert [row.controls[1].value for row in rows[2:]] == ["1"]
+    assert [row.controls[1].value for row in rows[3:4]] == ["1"]
     assert trace.retract_count == 1
 
 
@@ -1441,7 +1516,7 @@ def test_gcode_instrument_overlay_shows_mixed_tool_parameters():
     app._set_gcode_instrument_overlay(trace)
 
     rows = app.gcode_instrument_overlay.content.controls
-    assert rows[2].controls[2].value == "mixed"
+    assert rows[3].controls[2].value == "mixed"
 
 
 def test_gcode_visibility_checkbox_controls_render_options():

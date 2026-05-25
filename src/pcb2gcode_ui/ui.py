@@ -7,14 +7,14 @@ import flet as ft
 from pcb2gcode_ui.app_state import AppSettings, load_app_settings, save_app_settings
 from pcb2gcode_ui.gcode_preview import (
     GcodeInterpreter,
-    GcodeToolPath,
     GcodeTrace,
     gcode_cutoff_bounds,
     gcode_instrument_color,
-    gcode_tool_parameters_label,
+    gcode_tool_sections,
     gcode_trace_summary,
     generated_output_paths,
     load_gcode_trace,
+    write_gcode_tool_report,
 )
 from pcb2gcode_ui.help_content import (
     GENERAL_HELP,
@@ -1071,6 +1071,9 @@ class Pcb2GCodeApp:
             post_process_ok = self._post_process_generated_files()
             if not post_process_ok:
                 return
+            report_ok = self._write_gcode_tool_report()
+            if not report_ok:
+                return
         if generation_result.ok:
             self.generated_values_snapshot = self._values_snapshot()
             self._reset_gcode_preview_after_generation()
@@ -1105,6 +1108,36 @@ class Pcb2GCodeApp:
         return bool_value(self.values.get(POST_REMOVE_T_KEY, "false")) or bool_value(
             self.values.get(POST_ORIGIN_BEFORE_M3_KEY, "false")
         )
+
+    def _write_gcode_tool_report(self) -> bool:
+        source_kinds = self._generated_gcode_source_kinds(self.values)
+        if not source_kinds:
+            return True
+        try:
+            result = write_gcode_tool_report(
+                self.values,
+                self._base_dir(),
+                source_kinds,
+            )
+        except OSError as error:
+            self._append_process_log("Tool report", f"Tool report failed: {error}")
+            return False
+        self._append_process_log("Tool report", result.summary)
+        return True
+
+    def _generated_gcode_source_kinds(self, values: dict[str, str]) -> set[str]:
+        source_kinds: set[str] = set()
+        for source_kind in ("front", "back", "drill", "outline"):
+            if values.get(source_kind, "").strip():
+                source_kinds.add(source_kind)
+        if values.get("drill", "").strip() and any(
+            values.get(key, "").strip()
+            for key in ("milldrill-diameter", "min-milldrill-hole-diameter", "zmilldrill")
+        ):
+            source_kinds.add("milldrill")
+        if values.get(PRE_ALIGN_DRILL_SOURCE_KEY, "").strip():
+            source_kinds.add("align-drill")
+        return source_kinds
 
     def _with_pre_process_summary(
         self,
@@ -1207,29 +1240,32 @@ class Pcb2GCodeApp:
         self.gcode_status.value = "\n".join(lines)
 
     def _set_gcode_instrument_overlay(self, trace: GcodeTrace = None):
-        visible_instruments = _visible_instrument_rows(trace) if trace else []
-        if not visible_instruments:
+        tool_sections = gcode_tool_sections(trace) if trace else ()
+        if not tool_sections:
             self.gcode_instrument_overlay.visible = False
             self.gcode_instrument_overlay.content = None
             return
         rows: list[ft.Control] = [
             ft.Text("NC tools", color=TEXT_COLOR, size=BODY_TEXT_SIZE),
-            _instrument_overlay_header(),
         ]
-        for visible_idx, (idx, tool_path, bit_label, cut_count, retract_count) in enumerate(
-            visible_instruments,
-            start=1,
-        ):
-            rows.append(
-                _instrument_overlay_row(
-                    color=gcode_instrument_color(idx),
-                    path_index=visible_idx,
-                    tool_id=tool_path.tool_id,
-                    bit_label=bit_label,
-                    cut_count=cut_count,
-                    retract_count=retract_count,
-                )
+        for section in tool_sections:
+            rows.extend(
+                [
+                    _instrument_overlay_section_header(section.source_label),
+                    _instrument_overlay_header(),
+                ]
             )
+            for row in section.rows:
+                rows.append(
+                    _instrument_overlay_row(
+                        color=gcode_instrument_color(row.color_index),
+                        path_index=row.path_index,
+                        tool_id=row.tool_id,
+                        bit_label=row.bit_label,
+                        cut_count=row.cut_count,
+                        retract_count=row.retract_count,
+                    )
+                )
         self.gcode_instrument_overlay.content = ft.Column(rows, spacing=4)
         self.gcode_instrument_overlay.visible = True
         self._apply_gcode_instrument_overlay_position()
@@ -1497,6 +1533,18 @@ def _instrument_overlay_header() -> ft.Row:
     )
 
 
+def _instrument_overlay_section_header(source_label: str) -> ft.Text:
+    return ft.Text(
+        source_label,
+        color=TEXT_COLOR,
+        size=SMALL_TEXT_SIZE,
+        weight=ft.FontWeight.BOLD,
+        no_wrap=True,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+
 def _instrument_overlay_row(
     color: str,
     path_index: int,
@@ -1516,26 +1564,6 @@ def _instrument_overlay_row(
         spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
-
-
-def _visible_instrument_rows(
-    trace: GcodeTrace,
-) -> list[tuple[int, GcodeToolPath, str, int, int]]:
-    rows: list[tuple[int, GcodeToolPath, str, int, int]] = []
-    for idx, tool_path in enumerate(trace.active_tool_paths):
-        cut_count, retract_count = trace.tool_path_counts(tool_path.id)
-        if cut_count == 0:
-            continue
-        rows.append(
-            (
-                idx,
-                tool_path,
-                gcode_tool_parameters_label(trace, tool_path.id),
-                cut_count,
-                retract_count,
-            )
-        )
-    return rows
 
 
 def _small_table_text(value: str, width: int, color: ft.ColorValue) -> ft.Text:

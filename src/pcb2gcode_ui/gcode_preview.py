@@ -46,6 +46,7 @@ GCODE_INSTRUMENT_COLORS = (
     "#FF9F1C",
     "#F2F5EA",
 )
+TOOLS_REPORT_NAME = "tools.md"
 
 
 class GcodeMovementKind(StrEnum):
@@ -103,6 +104,32 @@ class GcodeToolPath:
     order_index: int
     line_number: int
     parameters: GcodeToolParameters = None
+
+
+@dataclass(frozen=True)
+class GcodeToolRow:
+    color_index: int
+    path_index: int
+    tool_id: str
+    bit_label: str
+    cut_count: int
+    retract_count: int
+
+
+@dataclass(frozen=True)
+class GcodeToolSection:
+    source_label: str
+    rows: tuple[GcodeToolRow, ...]
+
+
+@dataclass(frozen=True)
+class GcodeToolReportResult:
+    path: Path
+    sections: tuple[GcodeToolSection, ...]
+
+    @property
+    def summary(self) -> str:
+        return f"Tool report: wrote {self.path.name}."
 
 
 @dataclass(frozen=True)
@@ -528,6 +555,77 @@ def gcode_tool_parameters_label(trace: GcodeTrace, tool_path_id: str) -> str:
     return f"{item.tool_type} {item.diameter}"
 
 
+def gcode_tool_sections(trace: GcodeTrace) -> tuple[GcodeToolSection, ...]:
+    rows_by_source: dict[str, list[GcodeToolRow]] = {}
+    for color_index, tool_path in enumerate(trace.active_tool_paths):
+        cut_count, retract_count = trace.tool_path_counts(tool_path.id)
+        if cut_count == 0:
+            continue
+        rows = rows_by_source.setdefault(tool_path.source_label, [])
+        rows.append(
+            GcodeToolRow(
+                color_index=color_index,
+                path_index=len(rows) + 1,
+                tool_id=tool_path.tool_id,
+                bit_label=gcode_tool_parameters_label(trace, tool_path.id),
+                cut_count=cut_count,
+                retract_count=retract_count,
+            )
+        )
+    return tuple(
+        GcodeToolSection(source_label=source_label, rows=tuple(rows))
+        for source_label, rows in rows_by_source.items()
+    )
+
+
+def write_gcode_tool_report(
+    values: dict[str, str],
+    base_dir: Path,
+    source_kinds: set[str] = None,
+) -> GcodeToolReportResult:
+    trace = load_gcode_trace(values, base_dir, source_kinds)
+    sections = gcode_tool_sections(trace)
+    output_dir = _output_directory(values, base_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / TOOLS_REPORT_NAME
+    path.write_text(_format_gcode_tool_report(sections), encoding="utf-8")
+    LOGGER.debug("Wrote G-code tool report to %r", path)
+    return GcodeToolReportResult(path=path, sections=sections)
+
+
+def _format_gcode_tool_report(sections: tuple[GcodeToolSection, ...]) -> str:
+    lines = ["# NC Tools", ""]
+    if not sections:
+        lines.append("No cutting tools found.")
+        lines.append("")
+        return "\n".join(lines)
+
+    for section in sections:
+        lines.extend(
+            [
+                f"## {section.source_label}",
+                "",
+                "| Path | Tool | Bit | Cut | Pass |",
+                "| ---: | --- | --- | ---: | ---: |",
+            ]
+        )
+        for row in section.rows:
+            lines.append(
+                "| "
+                f"{row.path_index} | "
+                f"{_escape_markdown_table(row.tool_id)} | "
+                f"{_escape_markdown_table(row.bit_label)} | "
+                f"{row.cut_count} | "
+                f"{row.retract_count} |"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _escape_markdown_table(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("|", "\\|")
+
+
 def _movement_kind(start: GcodePoint, end: GcodePoint) -> GcodeMovementKind:
     if start.z_mm < 0 or end.z_mm < 0:
         return GcodeMovementKind.CUT
@@ -630,16 +728,20 @@ def _axis_value(
 
 
 def _output_path(values: dict[str, str], option_key: str, base_dir: Path) -> Path:
-    output_value = values.get("output-dir", "").strip()
-    output_dir = (
-        _resolve_path(output_value, base_dir)
-        if output_value
-        else _default_output_directory(values, base_dir)
-    )
+    output_dir = _output_directory(values, base_dir)
     file_name = values.get(option_key, "").strip()
     if not file_name:
         file_name = _default_output_name(option_key)
     return _resolve_path(file_name, output_dir)
+
+
+def _output_directory(values: dict[str, str], base_dir: Path) -> Path:
+    output_value = values.get("output-dir", "").strip()
+    return (
+        _resolve_path(output_value, base_dir)
+        if output_value
+        else _default_output_directory(values, base_dir)
+    )
 
 
 def _default_output_directory(values: dict[str, str], base_dir: Path) -> Path:
