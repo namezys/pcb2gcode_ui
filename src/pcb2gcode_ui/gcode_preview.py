@@ -123,16 +123,6 @@ class GcodeToolSection:
 
 
 @dataclass(frozen=True)
-class GcodeToolReportResult:
-    path: Path
-    sections: tuple[GcodeToolSection, ...]
-
-    @property
-    def summary(self) -> str:
-        return f"Tool report: wrote {self.path.name}."
-
-
-@dataclass(frozen=True)
 class GcodeBounds:
     min_x: float
     min_y: float
@@ -146,6 +136,17 @@ class GcodeBounds:
     @property
     def height(self) -> float:
         return self.max_y - self.min_y
+
+
+@dataclass(frozen=True)
+class GcodeToolReportResult:
+    path: Path
+    sections: tuple[GcodeToolSection, ...]
+    cutoff_bounds: GcodeBounds = None
+
+    @property
+    def summary(self) -> str:
+        return f"Tool report: wrote {self.path.name}."
 
 
 @dataclass(frozen=True)
@@ -585,19 +586,24 @@ def write_gcode_tool_report(
 ) -> GcodeToolReportResult:
     trace = load_gcode_trace(values, base_dir, source_kinds)
     sections = gcode_tool_sections(trace)
+    cutoff_bounds = gcode_cutoff_bounds(trace)
     output_dir = _output_directory(values, base_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / TOOLS_REPORT_NAME
-    path.write_text(_format_gcode_tool_report(sections), encoding="utf-8")
+    path.write_text(_format_gcode_tool_report(sections, cutoff_bounds), encoding="utf-8")
     LOGGER.debug("Wrote G-code tool report to %r", path)
-    return GcodeToolReportResult(path=path, sections=sections)
+    return GcodeToolReportResult(path=path, sections=sections, cutoff_bounds=cutoff_bounds)
 
 
-def _format_gcode_tool_report(sections: tuple[GcodeToolSection, ...]) -> str:
+def _format_gcode_tool_report(
+    sections: tuple[GcodeToolSection, ...],
+    cutoff_bounds: GcodeBounds = None,
+) -> str:
     lines = ["# NC Tools", ""]
     if not sections:
         lines.append("No cutting tools found.")
         lines.append("")
+        lines.extend(_format_cutoff_report(cutoff_bounds))
         return "\n".join(lines)
 
     for section in sections:
@@ -605,24 +611,39 @@ def _format_gcode_tool_report(sections: tuple[GcodeToolSection, ...]) -> str:
             [
                 f"## {section.source_label}",
                 "",
-                "| Path | Tool | Bit | Cut | Pass |",
-                "| ---: | --- | --- | ---: | ---: |",
             ]
         )
         for row in section.rows:
             lines.append(
-                "| "
-                f"{row.path_index} | "
-                f"{_escape_markdown_table(row.tool_id)} | "
-                f"{_escape_markdown_table(row.bit_label)} | "
-                f"{row.cut_count} | "
-                f"{row.retract_count} |"
+                "- [ ] "
+                f"Path {row.path_index}: "
+                f"tool {_escape_markdown_text(row.tool_id)}, "
+                f"bit {_escape_markdown_text(row.bit_label)}, "
+                f"cut {row.cut_count}, "
+                f"pass {row.retract_count}"
             )
         lines.append("")
+    lines.extend(_format_cutoff_report(cutoff_bounds))
     return "\n".join(lines)
 
 
-def _escape_markdown_table(value: str) -> str:
+def _format_cutoff_report(cutoff_bounds: GcodeBounds = None) -> list[str]:
+    if not cutoff_bounds:
+        return []
+    return [
+        "## Cutoff",
+        "",
+        (
+            "- Bounds: "
+            f"LB ({_format_mm(cutoff_bounds.min_x)}, {_format_mm(cutoff_bounds.min_y)}), "
+            f"TR ({_format_mm(cutoff_bounds.max_x)}, {_format_mm(cutoff_bounds.max_y)})"
+        ),
+        f"- Size: W {_format_mm(cutoff_bounds.width)}, H {_format_mm(cutoff_bounds.height)} mm",
+        "",
+    ]
+
+
+def _escape_markdown_text(value: str) -> str:
     return value.replace("\\", "\\\\").replace("|", "\\|")
 
 

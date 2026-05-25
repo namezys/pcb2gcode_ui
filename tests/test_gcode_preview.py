@@ -408,32 +408,53 @@ def test_write_gcode_tool_report_groups_tools_by_nc_file(tmp_path: Path):
     output_dir.mkdir()
     (output_dir / "front.ngc").write_text("G21\nT1 M6\nG1 X1 Z-0.1\n", encoding="utf-8")
     (output_dir / "back.ngc").write_text("G21\nT2 M6\nG1 X2 Z-0.1\n", encoding="utf-8")
+    (output_dir / "outline.ngc").write_text(
+        "\n".join(
+            [
+                "G21",
+                "T3 M6",
+                "G0 X10 Y5 Z1",
+                "G1 X12.5 Y5 Z-0.1",
+                "G1 X12.5 Y8.25 Z-0.1",
+                "G1 X10 Y8.25 Z-0.1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     result = write_gcode_tool_report(
         {
             "front": "front.gbr",
             "back": "back.gbr",
+            "outline": "outline.gbr",
             "output-dir": str(output_dir),
         },
         tmp_path,
-        {"front", "back"},
+        {"front", "back", "outline"},
     )
 
     assert result.path == output_dir / "tools.md"
+    assert result.cutoff_bounds == GcodeBounds(10, 5, 12.5, 8.25)
     assert result.path.read_text(encoding="utf-8") == (
         "# NC Tools\n"
         "\n"
         "## front.ngc\n"
         "\n"
-        "| Path | Tool | Bit | Cut | Pass |\n"
-        "| ---: | --- | --- | ---: | ---: |\n"
-        "| 1 | 1 | - | 1 | 0 |\n"
+        "- [ ] Path 1: tool 1, bit -, cut 1, pass 0\n"
         "\n"
         "## back.ngc\n"
         "\n"
-        "| Path | Tool | Bit | Cut | Pass |\n"
-        "| ---: | --- | --- | ---: | ---: |\n"
-        "| 1 | 2 | - | 1 | 0 |\n"
+        "- [ ] Path 1: tool 2, bit -, cut 1, pass 0\n"
+        "\n"
+        "## outline.ngc\n"
+        "\n"
+        "- [ ] Path 1: tool 3, bit -, cut 3, pass 1\n"
+        "\n"
+        "## Cutoff\n"
+        "\n"
+        "- Bounds: LB (10, 5), TR (12.5, 8.25)\n"
+        "- Size: W 2.5, H 3.25 mm\n"
     )
 
 

@@ -670,9 +670,7 @@ def test_successful_generation_writes_tool_report(monkeypatch, tmp_path: Path):
         "\n"
         "## front.ngc\n"
         "\n"
-        "| Path | Tool | Bit | Cut | Pass |\n"
-        "| ---: | --- | --- | ---: | ---: |\n"
-        "| 1 | 3 | - | 1 | 0 |\n"
+        "- [ ] Path 1: tool 3, bit -, cut 1, pass 0\n"
     )
     assert "Tool report: wrote tools.md." in app.command_output.value
 
